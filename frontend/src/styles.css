@@ -211,3 +211,6 @@ details p { margin: 8px 0; }
   .fab { display: none; }
   .chat { margin: 0; padding: 0; }
 }
+.legend.inline { grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
+.legend.inline li { grid-template-columns: 10px 1fr; row-gap: 0; }
+.legend.inline b { grid-column: 2; font-size: 15px; }

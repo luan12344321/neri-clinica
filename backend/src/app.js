@@ -8,7 +8,7 @@ import { q } from './db.js';
 import { audit } from './audit.js';
 import { askSara } from './sara.js';
 import googleRoutes, { pushAppointment } from './google.js';
-import { getDashboard, getFinanceSummary, getTopProcedures, getRestock, buildDre } from './queries.js';
+import { getDashboard, getFinanceSummary, getTopProcedures, getRestock, getCashFlow, buildDre } from './queries.js';
 
 const isTest = process.env.NODE_ENV === 'test';
 const DUMMY_HASH = bcrypt.hashSync('dummy-password-for-timing', 10);
@@ -156,6 +156,7 @@ app.get('/finance/summary', guard, (req) => {
   return getFinanceSummary(clinic(req), `${month}-01`);
 });
 app.get('/finance/top-procedures', guard, (req) => getTopProcedures(clinic(req), 6));
+app.get('/finance/cashflow', guard, (req) => getCashFlow(clinic(req), 6));
 app.get('/finance/dre', guard, (req) => {
   const { month } = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/) }).parse(req.query);
   return buildDre(clinic(req), `${month}-01`);

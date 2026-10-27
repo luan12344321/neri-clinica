@@ -119,3 +119,19 @@ test('cadastros: categoria, lançamento, protocolo e regras de automação', asy
   const rule = await t.call('POST', '/automation/followup-rules', { token, body: { daysAfter: 2, templateId: tpl.json.id } });
   assert.equal(rule.status, 201);
 });
+
+test('fluxo de caixa: 6 meses com o que foi efetivamente pago, só da própria clínica', async () => {
+  const r = await t.call('GET', '/finance/cashflow', { token });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.length, 6);
+  const [{ m }] = await t.sql(`SELECT to_char(now(), 'YYYY-MM') m`);
+  assert.equal(r.json.at(-1).month, m);
+  const [paid] = await t.sql(`SELECT COALESCE(SUM(amount) FILTER (WHERE type='income'),0)::float i,
+    COALESCE(SUM(amount) FILTER (WHERE type='expense'),0)::float e FROM transactions
+    WHERE clinic_id=$1 AND status='paid' AND paid_at >= date_trunc('month', now()) - interval '5 months'`, [A]);
+  assert.equal(r.json.reduce((a, x) => a + x.income, 0), paid.i);
+  assert.equal(r.json.reduce((a, x) => a + x.expense, 0), paid.e);
+  assert.ok(paid.i > 0 && paid.e > 0, 'o seed precisa ter entradas e saídas pagas');
+  const other = await t.call('GET', '/finance/cashflow', { token: await t.tokenFor('b@demo.test') });
+  assert.deepEqual(other.json.map((x) => x.income + x.expense), [0, 0, 0, 0, 0, 0]);
+});

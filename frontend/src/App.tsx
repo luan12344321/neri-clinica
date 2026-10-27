@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useLoad } from './hooks';
-import { Area, AreaChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { Area, AreaChart, Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { api, brl, getToken, lastMonths, monthLabel, setToken, thisMonth } from './api';
 import { Icon, type IconName } from './Icon';
 import { Cadastros, NewAppointment, type Section } from './Cadastros';
@@ -42,8 +42,10 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   const [view, setView] = useState<View>('inicio');
   const [open, setOpen] = useState(false);
   const me = useLoad<Me>('/me');
-  const alerts = useLoad<any[]>('/alerts');
+  // Estoque atual (não o aviso gravado pela rotina): some assim que o produto é reposto.
+  const restock = useLoad<any[]>('/stock/restock');
   const menuBtn = useRef<HTMLButtonElement>(null);
+  useEffect(() => { restock.reload(); }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!open) return;
@@ -53,7 +55,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   }, [open]);
 
   const go = (v: View) => { setView(v); setOpen(false); scrollTo({ top: 0 }); };
-  const nAlerts = alerts.data?.length ?? 0;
+  const nAlerts = restock.data?.length ?? 0;
 
   return (
     <div className={`shell${view === 'sara' ? ' on-sara' : ''}`}>
@@ -69,7 +71,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       </header>
 
       <main>
-        {view === 'inicio' && <Today name={me.data?.name} alerts={alerts.data ?? []} go={go} />}
+        {view === 'inicio' && <Today name={me.data?.name} restock={restock.data ?? []} go={go} />}
         {view === 'agenda' && <Agenda />}
         {view === 'financeiro' && <Finance />}
         {view === 'estoque' && <Stock />}
@@ -142,7 +144,7 @@ const Delta = ({ value }: { value: number | null }) =>
   value === null ? null : <span className={`delta${value < 0 ? ' down' : ''}`}>{value < 0 ? '▼' : '▲'} {pct(Math.abs(value))}% <i>vs mês anterior</i></span>;
 
 // ---------- Início ----------
-function Today({ name, alerts, go }: { name?: string; alerts: any[]; go: (v: View) => void }) {
+function Today({ name, restock, go }: { name?: string; restock: any[]; go: (v: View) => void }) {
   const dash = useLoad<any>('/dashboard');
   const sum = useLoad<any>(`/finance/summary?month=${thisMonth()}`);
   const recv = useLoad<any[]>('/finance/receivables');
@@ -198,12 +200,12 @@ function Today({ name, alerts, go }: { name?: string; alerts: any[]; go: (v: Vie
             <button className="kpi" onClick={() => go('financeiro')}><Icon name="receive" size={18} /><span>A receber</span><strong>{brl(toReceive)}</strong><small>{recv.data?.length ?? 0} pendente(s) de pagamento</small></button>
           </section>
 
-          {alerts.length > 0 && (
+          {restock.length > 0 && (
             <section className="card warn">
               <div className="between"><h2>Atenção</h2><button className="link" onClick={() => go('estoque')}>Ver estoque e reposição</button></div>
               <ul className="rows">
-                {alerts.map((a) => (
-                  <li key={a.id}><span>Repor <b>{a.payload.product}</b></span><span className="muted">tem {a.payload.quantity} · comprar {a.payload.buy}</span></li>
+                {restock.map((p) => (
+                  <li key={p.name}><span>Repor <b>{p.name}</b></span><span className="muted">tem {p.quantity} · comprar {p.qty_to_buy}</span></li>
                 ))}
               </ul>
             </section>
@@ -352,10 +354,11 @@ function Finance() {
   const dre = useLoad<any>(`/finance/dre?month=${month}`);
   const pay = useLoad<any[]>('/finance/payables');
   const recv = useLoad<any[]>('/finance/receivables');
+  const flow = useLoad<{ month: string; income: number; expense: number }[]>('/finance/cashflow');
 
   async function settle(id: string) {
     await api(`/finance/transactions/${id}/pay`, { method: 'POST', json: {} });
-    pay.reload(); recv.reload(); sum.reload();
+    pay.reload(); recv.reload(); sum.reload(); flow.reload();
   }
   const s = sum.data, r = dre.data;
   const total = (items: any[] | null) => (items ?? []).reduce((a, t) => a + Number(t.amount), 0);
@@ -403,6 +406,31 @@ function Finance() {
               {quick('pay', 'Contas a pagar', `${pay.data?.length ?? 0} pendente(s)`, total(pay.data))}
               {quick('alert', 'Inadimplência', `${overdue.length} vencido(s)`, total(overdue), overdue.length ? 'bad' : '')}
             </ul>
+          </section>
+          <section className="card">
+            <div className="between"><h2>Fluxo de caixa</h2><span className="muted">últimos 6 meses · pagos e recebidos</span></div>
+            <Status error={flow.error} loading={!flow.data} />
+            {flow.data && (
+              <>
+                <div className="chart" role="img" aria-label="Gráfico de barras com entradas e saídas de caixa por mês">
+                  <ResponsiveContainer width="100%" height={210}>
+                    <BarChart data={flow.data.map((f) => ({ ...f, m: monthLabel(f.month) }))} margin={{ top: 8, right: 8, left: -14, bottom: 0 }} barGap={4}>
+                      <CartesianGrid vertical={false} stroke="var(--line)" />
+                      <XAxis dataKey="m" tickLine={false} axisLine={false} tick={{ fill: 'var(--muted)', fontSize: 12 }} />
+                      <YAxis tickLine={false} axisLine={false} width={44} tick={{ fill: 'var(--muted)', fontSize: 12 }} tickFormatter={(v) => (v >= 1000 ? `${v / 1000}k` : v)} />
+                      <Tooltip cursor={{ fill: 'var(--line)', opacity: 0.4 }} formatter={(v: number, n: string) => [brl(v), n === 'income' ? 'Entradas' : 'Saídas']}
+                        contentStyle={{ background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--ink)' }} />
+                      <Bar dataKey="income" fill="var(--c1)" radius={[5, 5, 0, 0]} maxBarSize={22} />
+                      <Bar dataKey="expense" fill="var(--c4)" radius={[5, 5, 0, 0]} maxBarSize={22} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                <ul className="legend inline">
+                  <li><i style={{ background: 'var(--c1)' }} /><span>Entradas</span><b>{brl(flow.data.reduce((a, f) => a + f.income, 0))}</b></li>
+                  <li><i style={{ background: 'var(--c4)' }} /><span>Saídas</span><b>{brl(flow.data.reduce((a, f) => a + f.expense, 0))}</b></li>
+                </ul>
+              </>
+            )}
           </section>
           <section className="card">
             <h2>DRE</h2>

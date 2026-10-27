@@ -51,6 +51,19 @@ export async function getFinanceSummary(clinicId, monthStart) {
            averageTicket: t.n ? +(r.income / t.n).toFixed(2) : 0, proceduresDone: t.n };
 }
 
+// Fluxo de caixa (regime de caixa): o que entrou e saiu de fato (status 'paid') em cada um dos últimos meses.
+export const getCashFlow = (clinicId, months) =>
+  q(`WITH tz AS (SELECT timezone AS z FROM clinics WHERE id=$1),
+     m AS (SELECT generate_series(date_trunc('month', now() AT TIME ZONE z) - ($2::int - 1) * interval '1 month',
+                                  date_trunc('month', now() AT TIME ZONE z), interval '1 month')::date AS start FROM tz)
+     SELECT to_char(m.start, 'YYYY-MM') AS month,
+            COALESCE(SUM(t.amount) FILTER (WHERE t.type='income'), 0)::float AS income,
+            COALESCE(SUM(t.amount) FILTER (WHERE t.type='expense'), 0)::float AS expense
+     FROM m CROSS JOIN tz
+     LEFT JOIN transactions t ON t.clinic_id=$1 AND t.status='paid'
+       AND (t.paid_at AT TIME ZONE tz.z)::date >= m.start AND (t.paid_at AT TIME ZONE tz.z)::date < m.start + interval '1 month'
+     GROUP BY m.start ORDER BY m.start`, [clinicId, months]);
+
 export const getRestock = (clinicId) =>
   q(`SELECT name, quantity::float, min_quantity::float, qty_to_buy::float FROM v_restock WHERE clinic_id=$1 ORDER BY name`, [clinicId]);
 
