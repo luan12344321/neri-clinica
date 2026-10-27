@@ -10,7 +10,7 @@
 [build.environment]
   NODE_VERSION = "22"
   # runtime das funções com require() de módulos ES (fastify/light-my-request -> cookie)
-  AWS_LAMBDA_JS_RUNTIME = "nodejs24.x"
+  AWS_LAMBDA_JS_RUNTIME = "nodejs22.x"
 
 [functions]
   node_bundler = "esbuild"
