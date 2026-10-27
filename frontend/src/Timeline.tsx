@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Icon } from './Icon';
-import { dayIntervals, type Hours } from './hours';
+import { dayIntervals, fromMin, type Hours } from './hours';
 import { Avatar, Empty, Sheet } from './ui';
 
 export const ageOf = (birth?: string | null) => {
@@ -17,28 +17,26 @@ const HOUR = 56; // altura de uma hora, em px
 
 type Appt = { id: string; starts_at: string; ends_at?: string; status: string; patient: string; procedure: string | null; patient_id: string; birth_date?: string | null };
 
-// Linha do tempo do dia (estilo agenda): horas na lateral, blocos posicionados pelo horário, e uma marca no "agora".
-// Faixas fora do horário de atendimento (almoço, antes e depois) ficam sombreadas; os buracos entre os blocos são
-// os horários livres; concluídos ficam esmaecidos com um check.
+// Agenda de hoje: mostra SÓ o horário de atendimento da clínica, faixa por faixa (por padrão 08:00–11:00, depois
+// 13:00–18:00), uma logo abaixo da outra, sem o quadro do intervalo. Atendimentos fora dessas faixas não aparecem aqui
+// (continuam na tela Agenda). Blocos concluídos ficam esmaecidos com check; há uma marca no "agora".
 export function DayTimeline({ appts, hours, onOpen, onBook, onSeeAll }: { appts: Appt[]; hours: Hours; onOpen: (a: Appt) => void; onBook: () => void; onSeeAll: () => void }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 60_000); return () => clearInterval(id); }, []);
 
   const iv = dayIntervals(hours, now);
+  const GAP = 28; // separador entre as faixas (almoço)
+  const len = (s: number, e: number) => ((e - s) / 60) * HOUR;
+  const segs = iv.map(([s, e], i) => ({ s, e, top: iv.slice(0, i).reduce((a, [ps, pe]) => a + len(ps, pe) + GAP, 0) }));
+  const last = segs[segs.length - 1];
+  const total = last ? last.top + len(last.s, last.e) : 0;
+
   const items = appts.filter((a) => a.status !== 'canceled').map((a) => {
     const s = new Date(a.starts_at);
     const e = a.ends_at ? new Date(a.ends_at) : new Date(s.getTime() + 3600e3);
     return { a, s: mins(s), e: Math.max(mins(e), mins(s) + 15) };
   }).sort((x, y) => x.s - y.s);
-
-  // O quadro mostra só o horário de atendimento da clínica. Atendimentos fora dele (por exemplo, um lançamento de
-  // madrugada) vão para uma lista abaixo em vez de esticar a agenda. Em dia fechado, mostra só o intervalo dos que existirem.
-  const open0 = iv.length ? iv[0]![0] : items.length ? Math.min(...items.map((i) => i.s)) : 8 * 60;
-  const close0 = iv.length ? iv[iv.length - 1]![1] : items.length ? Math.max(...items.map((i) => i.e)) : 18 * 60;
-  const start = Math.floor(open0 / 60) * 60;
-  const end = Math.ceil(close0 / 60) * 60;
-  const shown = items.filter((it) => it.e > start && it.s < end);
-  const outside = items.filter((it) => !(it.e > start && it.s < end));
+  const shown = items.flatMap((it) => { const seg = segs.find((sg) => it.e > sg.s && it.s < sg.e); return seg ? [{ ...it, seg }] : []; });
   const lanes: number[] = [];
   const placed = shown.map((it) => {
     let l = lanes.findIndex((e) => e <= it.s);
@@ -50,24 +48,18 @@ export function DayTimeline({ appts, hours, onOpen, onBook, onSeeAll }: { appts:
 
   // horas livres = tempo de atendimento da clínica não ocupado por atendimentos (blocos sobrepostos contam uma vez)
   const merged: [number, number][] = [];
-  for (const it of items) { const last = merged[merged.length - 1]; if (last && it.s <= last[1]) last[1] = Math.max(last[1], it.e); else merged.push([it.s, it.e]); }
+  for (const it of shown) { const l = merged[merged.length - 1]; if (l && it.s <= l[1]) l[1] = Math.max(l[1], it.e); else merged.push([it.s, it.e]); }
   const worked = iv.reduce((a, [s, e]) => a + (e - s), 0);
   const covered = iv.reduce((a, [s, e]) => a + merged.reduce((b, [ms, me]) => b + Math.max(0, Math.min(e, me) - Math.max(s, ms)), 0), 0);
-  const free = Math.max(0, worked - covered);
   const h = (m: number) => (m / 60).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+  const sub = !iv.length ? 'Clínica fechada hoje' : shown.length ? `${h(Math.max(0, worked - covered))} h livres de ${h(worked)} h de atendimento` : 'Dia livre';
 
-  // trechos fora do atendimento dentro da faixa exibida
-  const off: { s: number; e: number; label?: string }[] = [];
-  if (iv.length) {
-    let cur = start;
-    iv.forEach(([s, e], i) => { if (s > cur) off.push({ s: cur, e: s, label: i > 0 ? 'Intervalo' : undefined }); cur = e; });
-    if (end > cur) off.push({ s: cur, e: end });
-  }
   const nowMin = mins(now);
-  const y = (m: number) => ((m - start) / 60) * HOUR;
-  const hoursList = Array.from({ length: (end - start) / 60 + 1 }, (_, i) => start + i * 60);
-  const sub = !iv.length ? (items.length ? 'Clínica fechada hoje (há atendimentos agendados)' : 'Clínica fechada hoje')
-    : items.length ? `${h(free)} h livres de ${h(worked)} h de atendimento` : 'Dia livre';
+  const nowSeg = segs.find((sg) => nowMin >= sg.s && nowMin <= sg.e);
+  const ticks = segs.flatMap((sg) => {
+    const hoursIn = Array.from({ length: Math.ceil(sg.e / 60) - Math.ceil(sg.s / 60) }, (_, i) => (Math.ceil(sg.s / 60) + i) * 60).filter((m) => m > sg.s && m < sg.e);
+    return [sg.s, ...hoursIn, sg.e].map((m) => ({ m, top: sg.top + len(sg.s, m) }));
+  });
 
   return (
     <section className="card g-timeline" id="agenda-hoje">
@@ -75,20 +67,19 @@ export function DayTimeline({ appts, hours, onOpen, onBook, onSeeAll }: { appts:
         <div><h2>Agenda de hoje</h2><p className="muted tl-free">{sub}</p></div>
         <button className="link" onClick={onSeeAll}>Ver agenda completa</button>
       </div>
-      {items.length === 0 ? <Empty icon="calendar" title={iv.length ? 'Nenhum atendimento hoje' : 'Clínica fechada hoje'} text={iv.length ? 'O dia está livre.' : 'Não há horário de atendimento configurado para hoje.'}><button className="primary sm" onClick={onBook}>Agendar</button></Empty> : (
-        <>
-        <div className="tl" style={{ height: y(end) + 8 }}>
-          {off.map((o) => <div key={o.s} className="tl-off" style={{ top: y(o.s), height: y(o.e) - y(o.s) }}>{o.label && <span>{o.label}</span>}</div>)}
-          {hoursList.map((m) => <div key={m} className="tl-hour" style={{ top: y(m) }}><span>{pad(Math.floor(m / 60))}:00</span></div>)}
-          {nowMin >= start && nowMin <= end && <div className="tl-now" style={{ top: y(nowMin) }}><i>{clock(now)}</i></div>}
-          {placed.map(({ a, s, e, lane }) => {
+      {!iv.length ? <Empty icon="calendar" title="Clínica fechada hoje" text="Não há horário de atendimento configurado para hoje."><button className="primary sm" onClick={onBook}>Agendar</button></Empty> : (
+        <div className="tl" style={{ height: total + 8 }}>
+          {segs.slice(1).map((sg, i) => <div key={sg.s} className="tl-gap" style={{ top: segs[i]!.top + len(segs[i]!.s, segs[i]!.e), height: GAP }}><span>Intervalo · {fromMin(segs[i]!.e)} às {fromMin(sg.s)}</span></div>)}
+          {ticks.map(({ m, top }) => <div key={`${m}-${top}`} className="tl-hour" style={{ top }}><span>{fromMin(m)}</span></div>)}
+          {nowSeg && <div className="tl-now" style={{ top: nowSeg.top + len(nowSeg.s, nowMin) }}><i>{clock(now)}</i></div>}
+          {placed.map(({ a, s, e, seg, lane }) => {
             const done = a.status === 'done';
             const late = !done && e < nowMin;
-            const cs = Math.max(s, start), ce = Math.min(e, end); // parte visível dentro do expediente
-            const bh = Math.max(28, ((ce - cs) / 60) * HOUR - 3);
+            const cs = Math.max(s, seg.s), ce = Math.min(e, seg.e); // parte que cabe na faixa
+            const bh = Math.max(28, len(cs, ce) - 3);
             return (
               <button key={a.id} className={`tl-item${done ? ' done' : ''}${late ? ' late' : ''}`} onClick={() => onOpen(a)}
-                style={{ top: y(cs) + 1, height: bh, left: `calc(52px + (100% - 52px) * ${lane / nLanes})`, width: `calc((100% - 52px) / ${nLanes} - 4px)` }}>
+                style={{ top: seg.top + len(seg.s, cs) + 1, height: bh, left: `calc(52px + (100% - 52px) * ${lane / nLanes})`, width: `calc((100% - 52px) / ${nLanes} - 4px)` }}>
                 <b>{clock(new Date(a.starts_at))} · {a.patient}</b>
                 {bh >= 44 && <span>{a.procedure ?? 'Sem procedimento'}{late ? ' · atrasado' : ''}</span>}
                 {done && <em aria-label="Concluído"><Icon name="check" size={14} /></em>}
@@ -96,17 +87,6 @@ export function DayTimeline({ appts, hours, onOpen, onBook, onSeeAll }: { appts:
             );
           })}
         </div>
-        {outside.length > 0 && (
-          <div className="tl-out">
-            <p className="muted">Fora do horário de atendimento</p>
-            <div>{outside.map(({ a }) => (
-              <button key={a.id} className={a.status === 'done' ? 'done' : ''} onClick={() => onOpen(a)}>
-                {clock(new Date(a.starts_at))} · {a.patient}{a.status === 'done' && <Icon name="check" size={14} />}
-              </button>
-            ))}</div>
-          </div>
-        )}
-        </>
       )}
     </section>
   );

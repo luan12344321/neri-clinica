@@ -566,8 +566,6 @@ button.ghost.danger { color: var(--neg); border-color: color-mix(in srgb, var(--
 .time-group { display: grid; gap: 6px; }
 .time-cap { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
 .link.small { font-size: 13px; min-height: 28px; }
-.tl-off { position: absolute; left: 48px; right: 0; background: repeating-linear-gradient(135deg, #f0eee6 0 8px, #f6f4ee 8px 16px); border-radius: 8px; z-index: 0; display: grid; place-items: center; }
-.tl-off span { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .hours-list { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 4px; }
 .hours-list li { padding: 10px 0; border-top: 1px solid var(--line); display: grid; gap: 8px; }
 .hours-list li:first-child { border-top: 0; }
@@ -579,9 +577,6 @@ button.ghost.danger { color: var(--neg); border-color: color-mix(in srgb, var(--
 .faixa select { width: auto; min-width: 96px; }
 @media (max-width: 480px) { .faixas { padding-left: 0; } }
 
-.tl-out { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); display: grid; gap: 6px; }
-.tl-out p { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
-.tl-out > div { display: flex; flex-wrap: wrap; gap: 8px; }
-.tl-out button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 99px; background: var(--bg); color: var(--ink); font-size: 13px; }
-.tl-out button.done { color: var(--muted); }
-.tl-out button .ico { color: var(--ok); }
+
+.tl-gap { position: absolute; left: 48px; right: 0; display: grid; place-items: center; border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); background: repeating-linear-gradient(135deg, #f0eee6 0 8px, #f6f4ee 8px 16px); border-radius: 6px; }
+.tl-gap span { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
