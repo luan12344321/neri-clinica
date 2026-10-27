@@ -17,6 +17,10 @@ const PATHS = {
   alert: 'M12 4l9 16H3zM12 10v4m0 3h.01',
   calendar: 'M5 5h14v15H5zM5 10h14M9 3v4m6-4v4',
   wallet: 'M4 7h15v12H4zM4 7l12-3v3M15 13h2',
+  check: 'M5 12.5l4.5 4.5L19 7.5',
+  plus: 'M12 5v14M5 12h14',
+  search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4',
+  back: 'M15 5l-7 7 7 7',
   pulse: 'M3 12h4l2-6 4 12 2-6h6',
 } as const;
 

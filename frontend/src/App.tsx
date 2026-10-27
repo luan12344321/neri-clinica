@@ -4,6 +4,7 @@ import { Area, AreaChart, Bar, BarChart, Cell, Pie, PieChart, ResponsiveContaine
 import { api, brl, getToken, lastMonths, monthLabel, setToken, thisMonth } from './api';
 import { Icon, type IconName } from './Icon';
 import { Cadastros, NewAppointment, type Section } from './Cadastros';
+import { Empty, ListSkeleton, ToastProvider } from './ui';
 
 type View = 'inicio' | 'agenda' | 'financeiro' | 'estoque' | 'sara' | 'pacientes' | 'procedimentos' | 'produtos' | 'mensagens';
 type Me = { name: string; role: string; clinic: string };
@@ -35,7 +36,7 @@ const pct = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 1 
 export default function App() {
   const [authed, setAuthed] = useState(!!getToken());
   if (!authed) return <Login onDone={() => setAuthed(true)} />;
-  return <Shell onLogout={() => { setToken(null); setAuthed(false); }} />;
+  return <ToastProvider><Shell onLogout={() => { setToken(null); setAuthed(false); }} /></ToastProvider>;
 }
 
 function Shell({ onLogout }: { onLogout: () => void }) {
@@ -74,7 +75,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         {view === 'inicio' && <Today name={me.data?.name} restock={restock.data ?? []} go={go} />}
         {view === 'agenda' && <Agenda />}
         {view === 'financeiro' && <Finance />}
-        {view === 'estoque' && <Stock />}
+        {view === 'estoque' && <Stock go={go} />}
         {view === 'sara' && <Sara name={me.data?.name} />}
         {(view === 'pacientes' || view === 'procedimentos' || view === 'mensagens') && <Cadastros section={view} />}
         {view === 'produtos' && <Cadastros section={'estoque' satisfies Section} />}
@@ -125,6 +126,8 @@ function Login({ onDone }: { onDone: () => void }) {
     finally { setBusy(false); }
   }
   return (
+    <div className="login-page">
+      <aside className="login-brand" aria-hidden="true"><span className="logo"><svg viewBox="0 0 24 24" width="30" height="30"><path d="M12 5v14M5 12h14" /></svg></span><h2>Gestão da clínica na palma da mão</h2><p>Agenda, financeiro, estoque e a Sara, sua assistente, em um só lugar.</p></aside>
     <form className="login" onSubmit={submit}>
       <span className="logo" aria-hidden="true"><svg viewBox="0 0 24 24" width="30" height="30"><path d="M12 5v14M5 12h14" /></svg></span>
       <h1>Clínica</h1>
@@ -134,11 +137,12 @@ function Login({ onDone }: { onDone: () => void }) {
       {error && <p role="alert" className="err">{error}</p>}
       <button className="primary" disabled={busy}>{busy ? 'Entrando…' : 'Entrar'}</button>
     </form>
+    </div>
   );
 }
 
 const Status = ({ error, loading }: { error: string; loading: boolean }) =>
-  error ? <p role="alert" className="err">{error}</p> : loading ? <p className="muted">Carregando…</p> : null;
+  error ? <p role="alert" className="err">{error}</p> : loading ? <ListSkeleton rows={3} /> : null;
 
 const Delta = ({ value }: { value: number | null }) =>
   value === null ? null : <span className={`delta${value < 0 ? ' down' : ''}`}>{value < 0 ? '▼' : '▲'} {pct(Math.abs(value))}% <i>vs mês anterior</i></span>;
@@ -293,7 +297,7 @@ function Agenda() {
     <>
       <div className="between"><p className="muted">Próximos 7 dias</p><NewAppointment onCreated={ap.reload} /></div>
       <Status error={ap.error} loading={!ap.data} />
-      {ap.data && days.size === 0 && <section className="card"><p className="muted">Nenhum atendimento nos próximos 7 dias.</p></section>}
+      {ap.data && days.size === 0 && <section className="card"><Empty icon="calendar" title="Agenda livre" text="Nenhum atendimento nos próximos 7 dias." /></section>}
       {[...days].map(([day, items]) => (
         <section key={day} className="card">
           <h2 className="cap">{day}</h2>
@@ -370,7 +374,7 @@ function Finance() {
   const list = (title: string, items: any[] | null, cta: string) => (
     <section className="card">
       <h2>{title}</h2>
-      {!items?.length ? <p className="muted">Nada pendente.</p> : (
+      {!items?.length ? <Empty icon="check" title="Nada pendente" /> : (
         <ul className="rows">
           {items.map((t) => (
             <li key={t.id}>
@@ -456,28 +460,35 @@ function Finance() {
 }
 
 // ---------- Estoque ----------
-function Stock() {
+function Stock({ go }: { go: (v: View) => void }) {
   const restock = useLoad<any[]>('/stock/restock');
   const protocols = useLoad<any[]>('/protocols');
   return (
-    <>
+    <div className="dash">
       <section className="card">
-        <h2>O que repor</h2>
+        <div className="between"><h2>O que repor</h2><button className="link" onClick={() => go('produtos')}>Registrar entrada</button></div>
         <Status error={restock.error} loading={!restock.data} />
-        {restock.data && (restock.data.length === 0 ? <p className="muted">Estoque em dia.</p> : (
+        {restock.data && (restock.data.length === 0 ? <Empty icon="check" title="Estoque em dia" text="Nenhum produto está no mínimo ou abaixo." /> : (
           <ul className="rows">
-            {restock.data.map((p) => (
-              <li key={p.name}>
-                <div>{p.name}<div className="muted">atual {p.quantity} · mínimo {p.min_quantity}</div></div>
-                <span className="pill warn">comprar {p.qty_to_buy}</span>
-              </li>
-            ))}
+            {restock.data.map((p) => {
+              const fill = Math.min(100, (Number(p.quantity) / Math.max(Number(p.min_quantity), 1)) * 100);
+              return (
+                <li key={p.name} className="stack">
+                  <div className="between">
+                    <div><b>{p.name}</b><div className="muted">atual {p.quantity} · mínimo {p.min_quantity}</div></div>
+                    <span className="pill warn">comprar {p.qty_to_buy}</span>
+                  </div>
+                  <div className="meter low" role="img" aria-label={`${p.quantity} de ${p.min_quantity} (mínimo)`}><div style={{ width: `${fill}%` }} /></div>
+                </li>
+              );
+            })}
           </ul>
         ))}
       </section>
       <section className="card">
         <h2>Protocolos</h2>
         <Status error={protocols.error} loading={!protocols.data} />
+        {protocols.data?.length === 0 && <Empty icon="syringe" title="Nenhum protocolo" text="Um protocolo define quais produtos cada procedimento consome e baixa o estoque sozinho." />}
         {protocols.data?.map((p) => (
           <details key={p.id}>
             <summary>{p.name}</summary>
@@ -486,12 +497,12 @@ function Stock() {
           </details>
         ))}
       </section>
-    </>
+    </div>
   );
 }
 
 // ---------- Sara ----------
-type Msg = { role: 'user' | 'sara'; text: string };
+type Msg = { role: 'user' | 'sara'; text: string; retry?: string };
 const SUGGESTIONS: { icon: IconName; title: string; text: string }[] = [
   { icon: 'chart', title: 'Faturamento', text: 'Faturamento e nº de pacientes dos últimos 6 meses' },
   { icon: 'box', title: 'Estoque', text: 'Quais produtos preciso repor?' },
@@ -513,7 +524,7 @@ function Sara({ name }: { name?: string }) {
       const r = await api<{ conversationId: string; reply: string }>('/sara/chat', { method: 'POST', json: { message, conversationId: convo.current } });
       convo.current = r.conversationId;
       setMsgs((m) => [...m, { role: 'sara', text: r.reply }]);
-    } catch { setMsgs((m) => [...m, { role: 'sara', text: 'Não consegui responder agora. Tente novamente em instantes.' }]); }
+    } catch { setMsgs((m) => [...m, { role: 'sara', text: 'Não consegui responder agora.', retry: message }]); }
     finally { setBusy(false); }
   }
 
@@ -534,7 +545,11 @@ function Sara({ name }: { name?: string }) {
             </div>
           </div>
         )}
-        {msgs.map((m, i) => <div key={i} className={`bubble ${m.role}`}>{m.text}</div>)}
+        {msgs.map((m, i) => (
+          <div key={i} className={`bubble ${m.role}`}>{m.text}
+            {m.retry && <button className="ghost sm retry" disabled={busy} onClick={() => { setMsgs((x) => x.slice(0, i - 1)); send(m.retry!); }}>Tentar novamente</button>}
+          </div>
+        ))}
         {busy && <div className="bubble sara muted">Sara está consultando os dados…</div>}
         <div ref={end} />
       </div>
