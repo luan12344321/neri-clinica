@@ -4,7 +4,8 @@ pg.types.setTypeParser(1082, (v) => v); // DATE como 'YYYY-MM-DD' (sem deslocame
 
 export const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
-  max: Number(process.env.PG_POOL_MAX ?? 10),
+  // Serverless: cada instância tem o seu pool; poucas conexões por instância para não esgotar o Neon.
+  max: Math.min(Number(process.env.PG_POOL_MAX ?? 10), process.env.VERCEL ? 2 : Infinity),
   idleTimeoutMillis: 10_000,        // serverless: não segura conexão ociosa
   connectionTimeoutMillis: 10_000,
 });

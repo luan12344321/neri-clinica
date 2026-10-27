@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
@@ -242,5 +243,15 @@ app.post('/sara/test', { ...owner, config: { rateLimit: { max: 5, timeWindow: '1
 });
 
 app.get('/health', async () => ({ ok: true }));
+
+// Cron da Vercel (vercel.json): chama GET com 'Authorization: Bearer <CRON_SECRET>'. Sem o segredo configurado a rota fica fechada.
+app.get('/cron/tick', async (req, reply) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return reply.code(503).send({ error: 'cron_not_configured' });
+  const got = Buffer.from(String(req.headers.authorization ?? '')), want = Buffer.from(`Bearer ${secret}`);
+  if (got.length !== want.length || !timingSafeEqual(got, want)) return reply.code(401).send({ error: 'unauthorized' });
+  const { tick } = await import('./jobs.js');
+  return tick();
+});
 
 export default app;
