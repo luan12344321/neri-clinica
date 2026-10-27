@@ -231,10 +231,10 @@ const aiError = (req, reply, e) => {
   req.log.error(e);
   return reply.code(f.code).send({ error: f.error });
 };
-app.post('/sara/chat', { ...manager, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
+app.post('/sara/chat', { ...guard, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
   const { message, conversationId } = z.object({
     message: z.string().min(1).max(2000), conversationId: z.guid().optional() }).parse(req.body);
-  try { return await askSara({ clinicId: clinic(req), userId: req.user.userId, message, conversationId }); }
+  try { return await askSara({ clinicId: clinic(req), userId: req.user.userId, role: req.user.role, ip: req.ip, message, conversationId }); }
   catch (e) { return aiError(req, reply, e); }
 });
 // Teste de conexão com a IA (configurações): uma chamada mínima, só para o dono.

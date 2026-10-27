@@ -37,7 +37,9 @@ O Netlify não mantém servidor ligado, por isso o `node-cron` do `server.js` n�
 | `DATABASE_URL` | string pooled do passo 1 |
 | `JWT_SECRET` | o mesmo do passo 1 (ou um novo; trocar derruba os logins ativos) |
 | `ENCRYPTION_KEY` | **a mesma** do passo 1. Se for trocada depois, CPF e prontuários já gravados deixam de abrir |
-| `ANTHROPIC_API_KEY` | chave da Julia |
+| `GEMINI_API_KEY` | chave da Julia (Google Gemini, projeto com cobrança ativa; marque como secreta) |
+| `GEMINI_MODEL` | opcional; padrão `gemini-3.5-flash-lite` |
+| `GEMINI_CLINIC_MONTHLY_TOKENS`, `GEMINI_TOTAL_MONTHLY_TOKENS` | opcional; limite de custo do app (tokens/mês). Padrão 1.000.000 por clínica e 5.000.000 no total |
 | `PG_POOL_MAX` | `3` |
 | `SARA_BUDGET_MS` | `40000` (veja "Limites") |
 | `APP_URL` | `https://SEU-SITE.netlify.app` |
@@ -57,7 +59,7 @@ Por linha de comando (opcional): `npx netlify-cli login`, `npx netlify-cli link`
 
 - **Guarde a `ENCRYPTION_KEY` em dois lugares** (por exemplo, gerenciador de senhas e cofre da empresa), fora do Netlify. Sem ela, os dados cifrados são irrecuperáveis.
 - **Backups:** confirme no provedor do banco que há backup automático e quanto tempo ele retém. Teste uma restauração antes de depender dela.
-- **Contas e termos:** LGPD exige base legal, política de privacidade e contrato com os operadores (Netlify, Neon/Supabase, Anthropic, Google). A Julia consulta apenas agregados (faturamento, procedimentos, estoque) e não envia nomes de pacientes ao modelo, mas confirme isso com quem responde juridicamente pela clínica.
+- **Contas e termos:** LGPD exige base legal, política de privacidade e contrato com os operadores (Netlify, Neon/Supabase, Google (Gemini e Agenda)). A Julia consulta agregados (faturamento, procedimentos, estoque) e, quando o usuário pergunta, agenda e busca de pacientes: nesses casos nome, nascimento e telefone vão ao modelo (nunca CPF, notas ou prontuário), cada consulta fica na auditoria e o uso exige o plano PAGO do Gemini (o gratuito pode treinar com os dados). Confirme isso com quem responde juridicamente pela clínica.
 - **WhatsApp:** o envio usa a Cloud API da Meta (`sendWhatsApp` em `backend/src/jobs.js`). Sem `WHATSAPP_TOKEN` e `WHATSAPP_PHONE_ID` as mensagens ficam como `failed` na fila (nunca "enviadas" sem sair). Mensagens iniciadas pela clínica fora da janela de 24h só são aceitas com modelo aprovado: crie o modelo na Meta (idioma pt_BR, corpo com uma variável `{{1}}`) e informe o nome em `WHATSAPP_TEMPLATE`.
 
 ## Limites do Netlify que afetam o app

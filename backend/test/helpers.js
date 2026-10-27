@@ -21,7 +21,7 @@ export async function setup() {
   Object.assign(process.env, {
     NODE_ENV: 'test', PG_POOL_MAX: '1', JWT_SECRET: 'test-secret-test-secret-test-secret-1234',
     DATABASE_URL: `postgres://postgres:postgres@127.0.0.1:${port}/postgres`,
-    ENCRYPTION_KEY: 'ab'.repeat(32), ANTHROPIC_API_KEY: 'test',
+    ENCRYPTION_KEY: 'ab'.repeat(32), GEMINI_API_KEY: 'test',
     GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'sec', GOOGLE_REDIRECT_URI: 'http://localhost/cb',
   });
   const { default: app } = await import('../src/app.js');
