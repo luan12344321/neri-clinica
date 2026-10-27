@@ -242,4 +242,8 @@ app.post('/sara/test', { ...owner, config: { rateLimit: { max: 5, timeWindow: '1
 
 app.get('/health', async () => ({ ok: true }));
 
+// Na Vercel a função só atende requisições depois que o arquivo de entrada chama listen() (o runtime intercepta a chamada).
+// Localmente quem sobe o servidor é server.js; nos testes o app é usado via inject().
+if (process.env.VERCEL) await app.listen({ port: Number(process.env.PORT ?? 3000), host: '0.0.0.0' });
+
 export default app;
