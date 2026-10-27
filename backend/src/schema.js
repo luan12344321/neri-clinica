@@ -8,6 +8,8 @@ const col = (table, column) => `SELECT 1 FROM information_schema.columns
 const STEPS = [
   { has: col('users', 'last_seen_at'),
     sql: 'ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at timestamptz' },
+  { has: col('clinics', 'working_hours'),
+    sql: 'ALTER TABLE clinics ADD COLUMN IF NOT EXISTS working_hours jsonb' },
   { has: col('bank_accounts', 'institution'),
     sql: `ALTER TABLE bank_accounts
             ADD COLUMN IF NOT EXISTS institution text NOT NULL DEFAULT 'Outro',

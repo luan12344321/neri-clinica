@@ -109,3 +109,7 @@ Opcional. Sem estas variáveis o app continua cobrando por Pix **estático** (se
 5. Só depois de testar no sandbox troque `ASAAS_ENV` para `production` com a chave de produção.
 
 Observações: as credenciais são por implantação (uma clínica por site). O CPF e o nome do paciente são enviados ao Asaas (fica registrado na auditoria como `asaas.customer_created`); inclua isso na política de privacidade. O dinheiro cai primeiro na conta do Asaas; confira as regras e tarifas de transferência para o seu banco.
+
+## Horário de atendimento
+
+Em **Configurações → Horário de atendimento** (dono e gerente) define-se, por dia da semana, até 3 faixas em intervalos de 30 min. O padrão é **08:00–11:00 e 13:00–18:00, de segunda a sexta** (sábado e domingo fechados). A agenda só oferece esses horários; há um atalho "horário fora do expediente" para encaixes. A coluna `clinics.working_hours` é criada sozinha na primeira chamada, se faltar (`backend/src/schema.js`).

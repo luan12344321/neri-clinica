@@ -5,6 +5,7 @@ import { ApiError, api, brl, getToken, lastMonths, monthLabel, setToken, thisMon
 import { Icon, type IconName } from './Icon';
 import { AppointmentSheet, Cadastros, NewAppointment, RescheduleSheet, type Focus, type Section } from './Cadastros';
 import { ApptSheet, DayTimeline, ageOf } from './Timeline';
+import { useHours } from './hours';
 import { Avatar, Empty, ErrorBoundary, EyeToggle, ListSkeleton, RoleProvider, ToastProvider, mask, useHideValues, useRole } from './ui';
 import { Settings, type Me } from './Settings';
 import { PresenceButton } from './Presence';
@@ -202,6 +203,7 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
   const pay = useLoad<any[]>(money ? '/finance/payables' : null);
   const banks = useLoad<Bank[]>(money ? '/banks' : null);
   const { isClinical } = useRole();
+  const { hours } = useHours();
   const [busyId, setBusyId] = useState('');
   const [bump, setBump] = useState(0);
   const [moving, setMoving] = useState<any | null>(null);
@@ -345,7 +347,7 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
             </section>
             </aside>
 
-            <DayTimeline appts={today} onOpen={setOpen} onBook={onBook} onSeeAll={() => go('agenda')} />
+            <DayTimeline appts={today} hours={hours} onOpen={setOpen} onBook={onBook} onSeeAll={() => go('agenda')} />
 
           </div>
 

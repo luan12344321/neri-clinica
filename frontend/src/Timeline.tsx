@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Icon } from './Icon';
+import { dayIntervals, type Hours } from './hours';
 import { Avatar, Empty, Sheet } from './ui';
 
 export const ageOf = (birth?: string | null) => {
@@ -17,19 +18,22 @@ const HOUR = 56; // altura de uma hora, em px
 type Appt = { id: string; starts_at: string; ends_at?: string; status: string; patient: string; procedure: string | null; patient_id: string; birth_date?: string | null };
 
 // Linha do tempo do dia (estilo agenda): horas na lateral, blocos posicionados pelo horário, e uma marca no "agora".
-// Os buracos entre os blocos são os horários livres; concluídos ficam esmaecidos com um check.
-export function DayTimeline({ appts, onOpen, onBook, onSeeAll }: { appts: Appt[]; onOpen: (a: Appt) => void; onBook: () => void; onSeeAll: () => void }) {
+// Faixas fora do horário de atendimento (almoço, antes e depois) ficam sombreadas; os buracos entre os blocos são
+// os horários livres; concluídos ficam esmaecidos com um check.
+export function DayTimeline({ appts, hours, onOpen, onBook, onSeeAll }: { appts: Appt[]; hours: Hours; onOpen: (a: Appt) => void; onBook: () => void; onSeeAll: () => void }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 60_000); return () => clearInterval(id); }, []);
 
+  const iv = dayIntervals(hours, now);
   const items = appts.filter((a) => a.status !== 'canceled').map((a) => {
     const s = new Date(a.starts_at);
     const e = a.ends_at ? new Date(a.ends_at) : new Date(s.getTime() + 3600e3);
     return { a, s: mins(s), e: Math.max(mins(e), mins(s) + 15) };
   }).sort((x, y) => x.s - y.s);
 
-  const start = Math.floor(Math.min(8 * 60, ...items.map((i) => i.s)) / 60) * 60;
-  const end = Math.ceil(Math.max(18 * 60, ...items.map((i) => i.e)) / 60) * 60;
+  const open0 = iv.length ? iv[0]![0] : 8 * 60, close0 = iv.length ? iv[iv.length - 1]![1] : 18 * 60;
+  const start = Math.floor(Math.min(open0, ...items.map((i) => i.s)) / 60) * 60;
+  const end = Math.ceil(Math.max(close0, ...items.map((i) => i.e)) / 60) * 60;
   const lanes: number[] = [];
   const placed = items.map((it) => {
     let l = lanes.findIndex((e) => e <= it.s);
@@ -39,36 +43,47 @@ export function DayTimeline({ appts, onOpen, onBook, onSeeAll }: { appts: Appt[]
   });
   const nLanes = Math.max(1, lanes.length);
 
-  // horas livres entre 08:00 e 18:00 (une blocos sobrepostos antes de somar)
-  let covered = 0, cursor = 8 * 60;
-  for (const it of items) {
-    const s = Math.max(it.s, cursor), e = Math.min(it.e, 18 * 60);
-    if (e > s) { covered += e - s; cursor = e; }
+  // horas livres = tempo de atendimento da clínica não ocupado por atendimentos (blocos sobrepostos contam uma vez)
+  const merged: [number, number][] = [];
+  for (const it of items) { const last = merged[merged.length - 1]; if (last && it.s <= last[1]) last[1] = Math.max(last[1], it.e); else merged.push([it.s, it.e]); }
+  const worked = iv.reduce((a, [s, e]) => a + (e - s), 0);
+  const covered = iv.reduce((a, [s, e]) => a + merged.reduce((b, [ms, me]) => b + Math.max(0, Math.min(e, me) - Math.max(s, ms)), 0), 0);
+  const free = Math.max(0, worked - covered);
+  const h = (m: number) => (m / 60).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+
+  // trechos fora do atendimento dentro da faixa exibida
+  const off: { s: number; e: number; label?: string }[] = [];
+  if (iv.length) {
+    let cur = start;
+    iv.forEach(([s, e], i) => { if (s > cur) off.push({ s: cur, e: s, label: i > 0 ? 'Intervalo' : undefined }); cur = e; });
+    if (end > cur) off.push({ s: cur, e: end });
   }
-  const free = Math.max(0, 10 * 60 - covered);
   const nowMin = mins(now);
   const y = (m: number) => ((m - start) / 60) * HOUR;
-  const hours = Array.from({ length: (end - start) / 60 + 1 }, (_, i) => start + i * 60);
+  const hoursList = Array.from({ length: (end - start) / 60 + 1 }, (_, i) => start + i * 60);
+  const sub = !iv.length ? (items.length ? 'Clínica fechada hoje (há atendimentos agendados)' : 'Clínica fechada hoje')
+    : items.length ? `${h(free)} h livres de ${h(worked)} h de atendimento` : 'Dia livre';
 
   return (
     <section className="card g-timeline" id="agenda-hoje">
       <div className="between">
-        <div><h2>Agenda de hoje</h2><p className="muted tl-free">{items.length ? `${(free / 60).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} h livres entre 08:00 e 18:00` : 'Dia livre'}</p></div>
+        <div><h2>Agenda de hoje</h2><p className="muted tl-free">{sub}</p></div>
         <button className="link" onClick={onSeeAll}>Ver agenda completa</button>
       </div>
-      {items.length === 0 ? <Empty icon="calendar" title="Nenhum atendimento hoje" text="O dia está livre."><button className="primary sm" onClick={onBook}>Agendar</button></Empty> : (
+      {items.length === 0 ? <Empty icon="calendar" title={iv.length ? 'Nenhum atendimento hoje' : 'Clínica fechada hoje'} text={iv.length ? 'O dia está livre.' : 'Não há horário de atendimento configurado para hoje.'}><button className="primary sm" onClick={onBook}>Agendar</button></Empty> : (
         <div className="tl" style={{ height: y(end) + 8 }}>
-          {hours.map((m) => <div key={m} className="tl-hour" style={{ top: y(m) }}><span>{pad(Math.floor(m / 60))}:00</span></div>)}
+          {off.map((o) => <div key={o.s} className="tl-off" style={{ top: y(o.s), height: y(o.e) - y(o.s) }}>{o.label && <span>{o.label}</span>}</div>)}
+          {hoursList.map((m) => <div key={m} className="tl-hour" style={{ top: y(m) }}><span>{pad(Math.floor(m / 60))}:00</span></div>)}
           {nowMin >= start && nowMin <= end && <div className="tl-now" style={{ top: y(nowMin) }}><i>{clock(now)}</i></div>}
           {placed.map(({ a, s, e, lane }) => {
             const done = a.status === 'done';
             const late = !done && e < nowMin;
-            const h = Math.max(28, ((e - s) / 60) * HOUR - 3);
+            const bh = Math.max(28, ((e - s) / 60) * HOUR - 3);
             return (
               <button key={a.id} className={`tl-item${done ? ' done' : ''}${late ? ' late' : ''}`} onClick={() => onOpen(a)}
-                style={{ top: y(s) + 1, height: h, left: `calc(52px + (100% - 52px) * ${lane / nLanes})`, width: `calc((100% - 52px) / ${nLanes} - 4px)` }}>
+                style={{ top: y(s) + 1, height: bh, left: `calc(52px + (100% - 52px) * ${lane / nLanes})`, width: `calc((100% - 52px) / ${nLanes} - 4px)` }}>
                 <b>{clock(new Date(a.starts_at))} · {a.patient}</b>
-                {h >= 44 && <span>{a.procedure ?? 'Sem procedimento'}{late ? ' · atrasado' : ''}</span>}
+                {bh >= 44 && <span>{a.procedure ?? 'Sem procedimento'}{late ? ' · atrasado' : ''}</span>}
                 {done && <em aria-label="Concluído"><Icon name="check" size={14} /></em>}
               </button>
             );

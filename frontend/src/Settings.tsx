@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ApiError, api } from './api';
 import { AddForm, errText, type Field } from './Cadastros';
 import { useLoad } from './hooks';
+import { DEFAULT_HOURS, fromMin, toMin, useHours, type Hours } from './hours';
 import { Icon } from './Icon';
 import { seenText, usePresence } from './Presence';
 import { Avatar, Empty, ListSkeleton, PageHead, ROLE_LABEL, Sheet, useInstall, useRole, useToast, type Role } from './ui';
@@ -17,11 +18,12 @@ const ROLE_HINT: Record<Exclude<Role, 'owner'>, string> = {
 const ROLE_OPTIONS = (Object.keys(ROLE_HINT) as (keyof typeof ROLE_HINT)[]).map((value) => ({ value, label: ROLE_LABEL[value] }));
 
 export function Settings({ me }: { me: Me | null }) {
-  const { isOwner } = useRole();
+  const { isOwner, isManager } = useRole();
   return (
     <div className="dash settings">
       <div className="span-all"><PageHead title="Configurações" hint={me?.clinic} /></div>
       <Account me={me} />
+      {isManager && <HoursCard />}
       <InstallCard />
       {isOwner && <Team />}
       {isOwner && <AssistantCard />}
@@ -204,6 +206,71 @@ function PaymentsCard() {
       {a?.configured && <div className="actions"><button className="ghost" disabled={state === 'busy'} onClick={test}>{state === 'busy' ? 'Testando…' : 'Testar conexão'}</button></div>}
       {state === 'ok' && <p className="ok-text" role="status"><Icon name="check" size={16} /> Conexão com o Asaas funcionando.</p>}
       {state === 'fail' && <p role="alert" className="err">Não foi possível conectar ao Asaas{detail ? `: ${detail}` : '. Confira a chave de API e o ambiente (teste ou produção).'}</p>}
+    </section>
+  );
+}
+
+// ---------- Horário de atendimento da clínica ----------
+const DAYS: [number, string][] = [[1, 'Segunda-feira'], [2, 'Terça-feira'], [3, 'Quarta-feira'], [4, 'Quinta-feira'], [5, 'Sexta-feira'], [6, 'Sábado'], [0, 'Domingo']];
+const TIMES = Array.from({ length: 48 }, (_, i) => fromMin(i * 30));
+const validDay = (f: [string, string][]) => f.every(([s, e], i) => toMin(e) > toMin(s) && (i === 0 || toMin(s) >= toMin(f[i - 1]![1])));
+const clone = (h: Hours): Hours => JSON.parse(JSON.stringify(h));
+
+function HoursCard() {
+  const { hours, loaded, isDefault, reload } = useHours();
+  const [draft, setDraft] = useState<Hours | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const toast = useToast();
+  useEffect(() => { if (loaded && !draft) setDraft(clone(hours)); }, [loaded]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!draft) return <section className="card"><h2>Horário de atendimento</h2><ListSkeleton rows={2} /></section>;
+
+  const set = (d: number, f: [string, string][]) => setDraft({ ...draft, [d]: f });
+  const dirty = JSON.stringify(draft) !== JSON.stringify(hours);
+  const badDay = DAYS.find(([d]) => !validDay(draft[d] ?? []));
+  async function save() {
+    setBusy(true); setErr('');
+    try { await api('/clinic/hours', { method: 'PUT', json: { hours: draft } }); reload(); toast('Horário de atendimento salvo'); }
+    catch (e) { setErr(errText(e)); } finally { setBusy(false); }
+  }
+  return (
+    <section className="card hours">
+      <div className="between"><h2>Horário de atendimento</h2>{isDefault && <span className="pill">Padrão</span>}</div>
+      <p className="muted">A agenda só oferece estes horários para agendar. Cada dia pode ter mais de uma faixa (por exemplo, manhã e tarde com o intervalo do almoço).</p>
+      <ul className="hours-list">
+        {DAYS.map(([d, label]) => {
+          const faixas = draft[d] ?? [];
+          const open = faixas.length > 0;
+          return (
+            <li key={d} className={!validDay(faixas) ? 'bad' : ''}>
+              <label className="day-switch">
+                <input type="checkbox" checked={open} onChange={(e) => set(d, e.target.checked ? [['08:00', '11:00'], ['13:00', '18:00']] : [])} />
+                <b>{label}</b>{!open && <span className="muted">fechado</span>}
+              </label>
+              {open && (
+                <div className="faixas">
+                  {faixas.map(([s, e], i) => (
+                    <div key={i} className="faixa">
+                      <select aria-label={`${label}: início da faixa ${i + 1}`} value={s} onChange={(ev) => set(d, faixas.map((f, j) => (j === i ? [ev.target.value, f[1]] : f)) as [string, string][])}>{TIMES.map((x) => <option key={x}>{x}</option>)}</select>
+                      <span>às</span>
+                      <select aria-label={`${label}: fim da faixa ${i + 1}`} value={e} onChange={(ev) => set(d, faixas.map((f, j) => (j === i ? [f[0], ev.target.value] : f)) as [string, string][])}>{TIMES.map((x) => <option key={x}>{x}</option>)}</select>
+                      <button className="icon-btn" aria-label={`Remover faixa ${i + 1} de ${label}`} onClick={() => set(d, faixas.filter((_, j) => j !== i))}><Icon name="close" size={18} /></button>
+                    </div>
+                  ))}
+                  {faixas.length < 3 && <button className="link small" onClick={() => set(d, [...faixas, ['14:00', '18:00']])}>+ Adicionar faixa</button>}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {badDay && <p role="alert" className="err">Confira {badDay[1].toLowerCase()}: o fim precisa ser depois do início e as faixas não podem se sobrepor.</p>}
+      {err && <p role="alert" className="err">{err}</p>}
+      <div className="actions">
+        <button className="primary" disabled={busy || !dirty || !!badDay} onClick={save}>{busy ? 'Salvando…' : 'Salvar horário'}</button>
+        <button className="ghost" onClick={() => { const seg = JSON.stringify(draft[1] ?? []); setDraft({ ...draft, 2: JSON.parse(seg), 3: JSON.parse(seg), 4: JSON.parse(seg), 5: JSON.parse(seg) }); }}>Copiar segunda para terça a sexta</button>
+        <button className="ghost" onClick={() => setDraft(clone(DEFAULT_HOURS))}>Restaurar padrão</button>
+      </div>
     </section>
   );
 }

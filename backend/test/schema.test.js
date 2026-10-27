@@ -12,6 +12,7 @@ test('banco antigo: as colunas novas são acrescentadas na primeira chamada e os
   await t.sql(`ALTER TABLE bank_accounts DROP COLUMN institution, DROP COLUMN kind, DROP COLUMN last4, DROP COLUMN pix_key_enc,
     DROP COLUMN pix_key_type, DROP COLUMN opening_balance, DROP COLUMN is_default, DROP COLUMN active, DROP COLUMN created_at`);
   await t.sql('ALTER TABLE users DROP COLUMN last_seen_at');
+  await t.sql('ALTER TABLE clinics DROP COLUMN working_hours');
   await t.sql(`INSERT INTO bank_accounts (clinic_id, name) VALUES ($1, 'Conta antiga')`, [A]);
   const owner = await t.tokenFor('gestor@demo.test');
 
@@ -24,4 +25,6 @@ test('banco antigo: as colunas novas são acrescentadas na primeira chamada e os
   assert.equal((await t.call('POST', '/presence/ping', { token: owner })).status, 204);
   const [{ n }] = await t.sql(`SELECT count(*)::int n FROM information_schema.columns WHERE table_name='users' AND column_name='last_seen_at'`);
   assert.equal(n, 1);
+  const h = await t.call('GET', '/clinic/hours', { token: owner });
+  assert.deepEqual([h.status, h.json.isDefault, h.json.hours[1]], [200, true, [['08:00', '11:00'], ['13:00', '18:00']]]);
 });

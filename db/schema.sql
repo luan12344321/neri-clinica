@@ -5,6 +5,7 @@ CREATE TABLE clinics (
   name text NOT NULL,
   cnpj text,
   timezone text NOT NULL DEFAULT 'America/Sao_Paulo',
+  working_hours jsonb,                       -- horário de atendimento por dia da semana (NULL = padrão; ver backend/src/hours.js)
   created_at timestamptz NOT NULL DEFAULT now()
 );
 

@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { ApiError, api, brl } from './api';
 import { useLoad } from './hooks';
 import { Icon } from './Icon';
+import { dayIntervals, fromMin, slotsOf, useHours } from './hours';
 import { Avatar, Empty, ListSkeleton, PageHead, Sheet, useRole, useToast } from './ui';
 
 type Opt = { value: string; label: string };
@@ -77,9 +78,23 @@ const SLOTS = Array.from({ length: 27 }, (_, i) => `${pad(7 + Math.floor(i / 2))
 type Slot = { date: string; time: string };
 
 export function SlotPicker({ value, onChange, ignoreId }: { value: Slot; onChange: (v: Slot) => void; ignoreId?: string }) {
+  const { hours } = useHours();
+  const [showAll, setShowAll] = useState(false); // encaixe fora do expediente
   const days = Array.from({ length: 14 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() + i); return d; });
-  const nextDay = new Date(`${value.date}T12:00`); nextDay.setDate(nextDay.getDate() + 1);
+  const isOpen = (d: Date) => dayIntervals(hours, d).length > 0;
+  const selected = new Date(`${value.date}T12:00`);
+  const nextDay = new Date(selected); nextDay.setDate(nextDay.getDate() + 1);
   const day = useList<any[]>(`/appointments?from=${value.date}&to=${ymd(nextDay)}`);
+
+  // Se o dia escolhido está fechado, vai para o primeiro dia aberto (só enquanto nenhum horário foi escolhido).
+  useEffect(() => {
+    if (showAll || value.time || isOpen(selected)) return;
+    const open = days.find(isOpen);
+    if (open) onChange({ date: ymd(open), time: '' });
+  }, [hours, showAll]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const intervals = dayIntervals(hours, selected);
+  const groups = showAll ? [{ label: 'Qualquer horário', times: SLOTS }] : intervals.map(([s, e]) => ({ label: `${fromMin(s)} às ${fromMin(e)}`, times: slotsOf([[s, e]]) }));
   const taken = (time: string) => {
     const t0 = new Date(`${value.date}T${time}`).getTime();
     return (day.data ?? []).some((a) => a.id !== ignoreId && a.status !== 'canceled' && t0 >= new Date(a.starts_at).getTime() && t0 < new Date(a.ends_at).getTime());
@@ -88,18 +103,28 @@ export function SlotPicker({ value, onChange, ignoreId }: { value: Slot; onChang
   return (
     <div className="picker">
       <div className="date-strip" role="listbox" aria-label="Dia">
-        {days.map((d) => (
-          <button key={ymd(d)} role="option" aria-selected={value.date === ymd(d)} onClick={() => onChange({ date: ymd(d), time: '' })}>
-            <i>{d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '')}</i><b>{d.getDate()}</b>
-          </button>
-        ))}
-      </div>
-      <div className="time-grid" role="listbox" aria-label="Horário">
-        {SLOTS.map((time) => {
-          const off = past(time) || taken(time);
-          return <button key={time} role="option" aria-selected={value.time === time} disabled={off} onClick={() => onChange({ ...value, time })}>{time}</button>;
+        {days.map((d) => {
+          const closed = !showAll && !isOpen(d);
+          return (
+            <button key={ymd(d)} role="option" aria-selected={value.date === ymd(d)} disabled={closed} className={closed ? 'closed' : ''} onClick={() => onChange({ date: ymd(d), time: '' })}>
+              <i>{d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '')}</i><b>{d.getDate()}</b>
+            </button>
+          );
         })}
       </div>
+      {groups.length === 0 && <p className="muted">A clínica não atende neste dia.</p>}
+      {groups.map((g) => (
+        <div key={g.label} className="time-group">
+          <p className="muted time-cap">{g.label}</p>
+          <div className="time-grid" role="listbox" aria-label={`Horários ${g.label}`}>
+            {g.times.map((time) => {
+              const off = past(time) || taken(time);
+              return <button key={time} role="option" aria-selected={value.time === time} disabled={off} onClick={() => onChange({ ...value, time })}>{time}</button>;
+            })}
+          </div>
+        </div>
+      ))}
+      <button type="button" className="link small" onClick={() => setShowAll((v) => !v)}>{showAll ? 'Mostrar só o horário de atendimento' : 'Precisa de um horário fora do expediente?'}</button>
     </div>
   );
 }
