@@ -255,69 +255,77 @@ function Today({ name, restock, go, money, onBook }: { name?: string; restock: a
       <section className="hello span-all">
         <h2>{greeting()}{first ? `, ${first}` : ''}</h2>
         <p className="muted">{new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+        {d && (
+          <div className="chips" aria-label="Resumo do dia">
+            <span>{today.length} atendimento(s)</span>
+            <span>{doneToday} concluído(s)</span>
+            <span className={todo.length ? 'hot' : ''}>{todo.length} pendência(s)</span>
+          </div>
+        )}
       </section>
       <div className="span-all"><Status error={dash.error || sum.error} loading={!d || (money && !s)} /></div>
       {d && (!money || s) && (
         <>
-          <section className="day-stats span-all" aria-label="Resumo do dia">
-            <button onClick={() => document.getElementById('agenda-hoje')?.scrollIntoView({ behavior: 'smooth' })}><strong>{today.length}</strong><span>atendimento(s) hoje</span></button>
-            <button onClick={() => document.getElementById('agenda-hoje')?.scrollIntoView({ behavior: 'smooth' })}><strong>{pending.length}</strong><span>a fazer · {doneToday} feito(s)</span></button>
-            <button className={todo.length ? 'warn' : ''} onClick={() => document.getElementById('pendencias')?.scrollIntoView({ behavior: 'smooth' })}><strong>{todo.length}</strong><span>{todo.length === 1 ? 'pendência' : 'pendências'}</span></button>
-          </section>
+          <div className="day-grid span-all">
+            <section className="next-card g-next">
+              <span className="next-label">Próximo atendimento</span>
+              {next ? (
+                <>
+                  <div className="next-main">
+                    <Avatar name={next.patient} size={46} />
+                    <div className="grow"><b>{next.patient}</b><span>{next.procedure ?? 'Sem procedimento'}</span></div>
+                    <span className="next-time"><Icon name="calendar" size={16} />{timeOf(next)}</span>
+                  </div>
+                  <div className="next-actions">
+                    <button className="ghost" onClick={() => setMoving(next)}>Reagendar</button>
+                    <button className="primary" disabled={busyId === next.id} onClick={() => complete(next.id)}>Concluir</button>
+                  </div>
+                </>
+              ) : <p className="next-empty">{today.length === 0 ? 'Nenhum atendimento para hoje.' : late.length ? 'Os atendimentos restantes de hoje já passaram do horário.' : 'Todos os atendimentos de hoje foram concluídos.'}</p>}
+            </section>
 
-          <section className="next-card span-all">
-            <span className="next-label">Próximo atendimento</span>
-            {next ? (
-              <>
-                <div className="next-main">
-                  <Avatar name={next.patient} size={46} />
-                  <div className="grow"><b>{next.patient}</b><span>{next.procedure ?? 'Sem procedimento'}</span></div>
-                  <span className="next-time"><Icon name="calendar" size={16} />{timeOf(next)}</span>
-                </div>
-                <div className="next-actions">
-                  <button className="ghost" onClick={() => setMoving(next)}>Reagendar</button>
-                  <button className="primary" disabled={busyId === next.id} onClick={() => complete(next.id)}>Concluir</button>
-                </div>
-              </>
-            ) : <p className="next-empty">{today.length === 0 ? 'Nenhum atendimento para hoje.' : late.length ? 'Os atendimentos restantes de hoje já passaram do horário.' : 'Todos os atendimentos de hoje foram concluídos.'}</p>}
-          </section>
-
-          <section className="card" id="agenda-hoje">
-            <div className="between"><h2>Agenda de hoje</h2><button className="link" onClick={() => go('agenda')}>Ver agenda completa</button></div>
-            {today.length === 0 ? <Empty icon="calendar" title="Dia livre" text="Nenhum atendimento hoje."><button className="primary sm" onClick={onBook}>Agendar</button></Empty> : (
-              <ul className="rows">
-                {today.map((a: any) => (
-                  <li key={a.id}>
-                    <div>
-                      <b>{timeOf(a)}</b>{' '}{a.patient}
-                      <div className="muted">{a.procedure ?? 'Sem procedimento'}</div>
-                    </div>
-                    {a.status === 'done' ? <span className="pill ok">Concluído</span>
-                      : <button className="primary sm" disabled={busyId === a.id} onClick={() => complete(a.id)}>Concluir</button>}
+            {todo.length > 0 ? (
+              <section className="card attn g-attn" id="pendencias">
+                <div className="attn-head"><h2>Precisa de atenção</h2><span className="badge" aria-label={`${todo.length} pendência(s)`}>{todo.length}</span></div>
+                <ul className="todo">{todo.map((t) => (
+                  <li key={t.text}>
+                    <button onClick={t.run}>
+                      <span className={`q-ico ${t.tone === 'bad' ? 'bad' : ''}`}><Icon name={t.icon} size={20} /></span>
+                      <span className="grow"><b>{t.text}</b>{t.hint && <span className="muted wrap">{t.hint}</span>}</span>
+                      <Icon name="back" size={18} />
+                    </button>
                   </li>
-                ))}
-              </ul>
+                ))}</ul>
+              </section>
+            ) : (
+              <section className="card attn ok g-attn" id="pendencias">
+                <span className="q-ico"><Icon name="check" size={20} /></span>
+                <div className="grow"><b>Tudo em dia</b><span className="muted">Nada pendente por enquanto.</span></div>
+              </section>
             )}
-          </section>
 
-          <section className="card" id="pendencias">
-            <h2>O que precisa de atenção hoje</h2>
-            {todo.length === 0 ? <Empty icon="check" title="Tudo em dia" text="Nada pendente por enquanto." /> : (
-              <ul className="todo">{todo.map((t) => (
-                <li key={t.text}>
-                  <button onClick={t.run}>
-                    <span className={`q-ico ${t.tone === 'bad' ? 'bad' : ''}`}><Icon name={t.icon} size={20} /></span>
-                    <span className="grow"><b>{t.text}</b>{t.hint && <span className="muted wrap">{t.hint}</span>}</span>
-                    <Icon name="back" size={18} />
-                  </button>
-                </li>
-              ))}</ul>
-            )}
-          </section>
+            <section className="card g-agenda" id="agenda-hoje">
+              <div className="between"><h2>Agenda de hoje</h2><button className="link" onClick={() => go('agenda')}>Ver agenda completa</button></div>
+              {today.length === 0 ? <Empty icon="calendar" title="Dia livre" text="Nenhum atendimento hoje."><button className="primary sm" onClick={onBook}>Agendar</button></Empty> : (
+                <ul className="rows">
+                  {today.map((a: any) => (
+                    <li key={a.id}>
+                      <div>
+                        <b>{timeOf(a)}</b>{' '}{a.patient}
+                        <div className="muted">{a.procedure ?? 'Sem procedimento'}</div>
+                      </div>
+                      {a.status === 'done' ? <span className="pill ok">Concluído</span>
+                        : <button className="primary sm" disabled={busyId === a.id} onClick={() => complete(a.id)}>Concluir</button>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
 
-          <section className="quick-actions span-all" aria-label="Ações rápidas">
-            {quick.map((q) => <button key={q.label} onClick={q.run}><span><Icon name={q.icon} size={22} /></span>{q.label}</button>)}
-          </section>
+            <section className="quick-actions g-quick" aria-label="Ações rápidas">
+              {quick.map((q) => <button key={q.label} onClick={q.run}><span><Icon name={q.icon} size={22} /></span>{q.label}</button>)}
+            </section>
+          </div>
 
           {money && s && (
             <section className="hero-card span-all">

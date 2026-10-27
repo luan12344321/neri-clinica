@@ -128,13 +128,13 @@ function Summary({ sum, flow, banks, recv, pay, bump, goTab }: { sum: ReturnType
                       <Tooltip cursor={{ fill: 'var(--line)', opacity: 0.4 }} formatter={(v: number, n: string) => [hidden ? '••••' : brl(v), n === 'income' ? 'Entradas' : 'Saídas']}
                         contentStyle={{ background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--ink)' }} />
                       <Bar dataKey="income" fill="var(--c1)" radius={[5, 5, 0, 0]} maxBarSize={22} />
-                      <Bar dataKey="expense" fill="var(--c4)" radius={[5, 5, 0, 0]} maxBarSize={22} />
+                      <Bar dataKey="expense" fill="var(--out)" radius={[5, 5, 0, 0]} maxBarSize={22} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
                 <ul className="legend inline">
                   <li><i style={{ background: 'var(--c1)' }} /><span>Entradas</span><b>{mask(brl(flow.data.reduce((a, f) => a + f.income, 0)), hidden)}</b></li>
-                  <li><i style={{ background: 'var(--c4)' }} /><span>Saídas</span><b>{mask(brl(flow.data.reduce((a, f) => a + f.expense, 0)), hidden)}</b></li>
+                  <li><i style={{ background: 'var(--out)' }} /><span>Saídas</span><b>{mask(brl(flow.data.reduce((a, f) => a + f.expense, 0)), hidden)}</b></li>
                 </ul>
               </>
             )}
