@@ -12,8 +12,8 @@ export default defineConfig({
         short_name: 'Clínica',
         lang: 'pt-BR',
         display: 'standalone',
-        background_color: '#f6f4ef',
-        theme_color: '#0f5c57',
+        background_color: '#f4f3ee',
+        theme_color: '#163b2d',
         icons: [{ src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }],
       },
       // Dados da API nunca são cacheados pelo service worker (financeiro/saúde).

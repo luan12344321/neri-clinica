@@ -14,6 +14,14 @@ test('login: credenciais corretas devolvem token que acessa o dashboard', async 
   assert.equal(d.status, 200);
 });
 
+test('/me devolve nome, papel e clínica do usuário logado e exige token', async () => {
+  const r = await t.call('POST', '/auth/login', { body: { email: 'gestor@demo.test', password: 'demo1234' } });
+  const me = await t.call('GET', '/me', { token: r.json.token });
+  assert.equal(me.status, 200);
+  assert.deepEqual(me.json, { name: 'Gestor Demo', role: 'owner', clinic: 'Clínica Demo' });
+  assert.equal((await t.call('GET', '/me')).status, 401);
+});
+
 test('login: senha errada e e-mail inexistente dão a mesma resposta 401', async () => {
   const wrong = await t.call('POST', '/auth/login', { body: { email: 'gestor@demo.test', password: 'errada' } });
   const none = await t.call('POST', '/auth/login', { body: { email: 'ninguem@demo.test', password: 'demo1234' } });

@@ -56,6 +56,12 @@ app.post('/auth/login', { config: { rateLimit: { max: 10, timeWindow: '1 minute'
   return { token: app.jwt.sign({ userId: u.id, clinicId: u.clinic_id, role: u.role }, { expiresIn: '12h' }) };
 });
 
+app.get('/me', guard, async (req, reply) => {
+  const [u] = await q(`SELECT u.name, u.role, c.name AS clinic FROM users u JOIN clinics c ON c.id=u.clinic_id
+                       WHERE u.id=$1 AND u.clinic_id=$2`, [req.user.userId, clinic(req)]);
+  return u ?? reply.code(401).send({ error: 'unauthorized' });
+});
+
 // ---------- Dashboard / agenda ----------
 app.get('/dashboard', guard, (req) => getDashboard(clinic(req)));
 

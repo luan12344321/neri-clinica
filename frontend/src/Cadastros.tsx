@@ -85,23 +85,14 @@ export function NewAppointment({ onCreated }: { onCreated: () => void }) {
 }
 
 // ---------- Aba Cadastros ----------
-type Section = 'pacientes' | 'procedimentos' | 'estoque' | 'mensagens';
-const SECTIONS: { id: Section; label: string }[] = [
-  { id: 'pacientes', label: 'Pacientes' }, { id: 'procedimentos', label: 'Procedimentos' },
-  { id: 'estoque', label: 'Estoque' }, { id: 'mensagens', label: 'Mensagens' },
-];
-
-export function Cadastros() {
-  const [sec, setSec] = useState<Section>('pacientes');
+export type Section = 'pacientes' | 'procedimentos' | 'estoque' | 'mensagens';
+export function Cadastros({ section }: { section: Section }) {
   return (
     <>
-      <div className="seg" role="tablist">
-        {SECTIONS.map((s) => <button key={s.id} role="tab" aria-selected={sec === s.id} onClick={() => setSec(s.id)}>{s.label}</button>)}
-      </div>
-      {sec === 'pacientes' && <Patients />}
-      {sec === 'procedimentos' && <Procedures />}
-      {sec === 'estoque' && <Products />}
-      {sec === 'mensagens' && <Messages />}
+      {section === 'pacientes' && <Patients />}
+      {section === 'procedimentos' && <Procedures />}
+      {section === 'estoque' && <Products />}
+      {section === 'mensagens' && <Messages />}
     </>
   );
 }
@@ -266,7 +257,7 @@ function Messages() {
       <section className="card"><h2>Modelos</h2>
         <Loading error={auto.error} ready={!!auto.data} />
         <ul className="rows">{t.map((m) => <li key={m.id}><div><b>{KIND[m.kind] ?? m.kind}</b><div className="muted">{m.body}</div></div></li>)}</ul>
-        <p className="muted" style={{ marginTop: 12 }}>O envio real pelo WhatsApp ainda não está ligado: as mensagens ficam na fila.</p>
+        <p className="muted" style={{ marginTop: 12 }}>As mensagens entram na fila e saem pelo WhatsApp; sem a conexão configurada, ficam como falhas na fila.</p>
       </section>
       <section className="card"><h2>Nova regra pós-procedimento</h2>
         <AddForm label="Salvar regra" onSubmit={async (v) => { await api('/automation/followup-rules', { method: 'POST', json: v }); auto.reload(); }} fields={[
