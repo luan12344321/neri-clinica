@@ -4,7 +4,7 @@ export const setToken = (t: string | null) => {
   try { t ? localStorage.setItem(KEY, t) : localStorage.removeItem(KEY); } catch { /* storage bloqueado */ }
 };
 
-export class ApiError extends Error { constructor(public status: number, msg: string) { super(msg); } }
+export class ApiError extends Error { constructor(public status: number, msg: string, public detail?: string) { super(msg); } }
 
 export async function api<T = any>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -14,7 +14,7 @@ export async function api<T = any>(path: string, init: RequestInit & { json?: un
   });
   if (res.status === 401 && path !== '/auth/login') { setToken(null); location.reload(); }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, data.error ?? 'Erro inesperado');
+  if (!res.ok) throw new ApiError(res.status, data.error ?? 'Erro inesperado', data.detail);
   return data as T;
 }
 

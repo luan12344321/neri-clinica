@@ -25,6 +25,8 @@ export function Settings({ me }: { me: Me | null }) {
       <InstallCard />
       {isOwner && <Team />}
       {isOwner && <AssistantCard />}
+      {isOwner && <PaymentsCard />}
+      <footer className="credit span-all"><span>Desenvolvido por</span><img src="/neri-logo.png" alt="NERI Design & Web" /></footer>
     </div>
   );
 }
@@ -167,6 +169,41 @@ function AssistantCard() {
       {state === 'ok' && <p className="ok-text" role="status"><Icon name="check" size={16} /> Tudo certo: a Julia está respondendo.</p>}
       {state === 'down' && <p role="alert" className="err">Sem conexão com a IA. Verifique se a conta da Anthropic tem crédito e se a chave (ANTHROPIC_API_KEY) está correta no Netlify.</p>}
       {state === 'error' && <p role="alert" className="err">Não foi possível testar agora. Tente novamente em instantes.</p>}
+    </section>
+  );
+}
+
+// Conexão com o Asaas (confirmação automática de Pix). As chaves ficam nas variáveis do Netlify, nunca nesta tela.
+function PaymentsCard() {
+  const integ = useLoad<{ asaas: { configured: boolean; sandbox: boolean } }>('/integrations');
+  const [state, setState] = useState<'idle' | 'busy' | 'ok' | 'fail'>('idle');
+  const [detail, setDetail] = useState('');
+  const [copied, setCopied] = useState(false);
+  const url = `${location.origin}/api/webhooks/asaas`;
+  const a = integ.data?.asaas;
+  async function test() {
+    setState('busy'); setDetail('');
+    try { await api('/integrations/asaas/test', { method: 'POST', json: {} }); setState('ok'); }
+    catch (e) { setState('fail'); setDetail(e instanceof ApiError && e.detail ? e.detail : ''); }
+  }
+  async function copy() { try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* sem permissão */ } }
+  return (
+    <section className="card">
+      <div className="between"><h2>Pagamentos (Asaas)</h2>{a && <span className={`pill ${a.configured ? 'ok' : 'warn'}`}>{a.configured ? (a.sandbox ? 'Conectado · modo teste' : 'Conectado') : 'Não conectado'}</span>}</div>
+      <p className="muted">Cobra por Pix e dá a baixa sozinho quando o paciente paga. O dinheiro cai na conta digital do Asaas.</p>
+      {a && !a.configured && (
+        <ol className="steps">
+          <li>Crie a conta no Asaas e gere uma <b>chave de API</b> (comece pelo ambiente de teste).</li>
+          <li>No Netlify, cadastre <b>ASAAS_API_KEY</b>, <b>ASAAS_WEBHOOK_TOKEN</b> (um segredo seu, de 32 a 255 caracteres) e <b>ASAAS_ENV</b> (<code>sandbox</code> ou <code>production</code>) e faça um novo deploy.</li>
+          <li>No Asaas, em Integrações → Webhooks, cadastre o endereço abaixo, o mesmo segredo e os eventos de cobrança.</li>
+        </ol>
+      )}
+      <label className="form-label">Endereço do webhook (cole no Asaas)
+        <span className="pw"><input readOnly value={url} onFocus={(e) => e.currentTarget.select()} /><button type="button" aria-label="Copiar endereço" onClick={copy}><Icon name={copied ? 'check' : 'copy'} size={20} /></button></span>
+      </label>
+      {a?.configured && <div className="actions"><button className="ghost" disabled={state === 'busy'} onClick={test}>{state === 'busy' ? 'Testando…' : 'Testar conexão'}</button></div>}
+      {state === 'ok' && <p className="ok-text" role="status"><Icon name="check" size={16} /> Conexão com o Asaas funcionando.</p>}
+      {state === 'fail' && <p role="alert" className="err">Não foi possível conectar ao Asaas{detail ? `: ${detail}` : '. Confira a chave de API e o ambiente (teste ou produção).'}</p>}
     </section>
   );
 }

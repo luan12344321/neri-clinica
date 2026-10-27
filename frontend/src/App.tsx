@@ -123,7 +123,7 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
           <div className="scrim" onClick={() => setOpen(false)} />
           <nav className="drawer" role={open ? 'dialog' : undefined} aria-modal={open || undefined} aria-label="Menu principal">
             <div className="drawer-head">
-              <div><strong>Clínica</strong><span>{me?.clinic ?? 'Gestão'}</span></div>
+              <div className="drawer-title"><img src="/neri-n.png" alt="" /><div><strong>Clínica</strong><span>{me?.clinic ?? 'Gestão'}</span></div></div>
               <button className="icon-btn on-dark close-btn" aria-label="Fechar menu" onClick={() => { setOpen(false); menuBtn.current?.focus(); }}><Icon name="close" /></button>
             </div>
             {NAV.map((g) => ({ ...g, items: g.items.filter((i) => !i.mgr || isManager) })).filter((g) => g.items.length).map((g) => (
@@ -161,9 +161,9 @@ function Login({ onDone }: { onDone: () => void }) {
   }
   return (
     <div className="login-page">
-      <aside className="login-brand" aria-hidden="true"><span className="logo"><svg viewBox="0 0 24 24" width="30" height="30"><path d="M12 5v14M5 12h14" /></svg></span><h2>Gestão da clínica na palma da mão</h2><p>Agenda, financeiro, estoque e a Julia, sua assistente, em um só lugar.</p></aside>
+      <aside className="login-brand" aria-hidden="true"><img className="brand-logo" src="/neri-logo.png" alt="" /><h2>Gestão da clínica na palma da mão</h2><p>Agenda, financeiro, estoque e a Julia, sua assistente, em um só lugar.</p></aside>
     <form className="login" aria-label="Entrar" onSubmit={submit}>
-      <span className="logo" aria-hidden="true"><svg viewBox="0 0 24 24" width="30" height="30"><path d="M12 5v14M5 12h14" /></svg></span>
+      <span className="logo" aria-hidden="true"><img src="/neri-n.png" alt="" /></span>
       <h1>Clínica</h1>
       <p className="muted">Gestão na palma da mão.</p>
       <label>E-mail<input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>

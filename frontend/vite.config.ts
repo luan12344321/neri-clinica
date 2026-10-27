@@ -7,7 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon.svg', 'apple-touch-icon.png'],
+      includeAssets: ['apple-touch-icon.png', 'neri-logo.png', 'neri-n.png'],
       manifest: {
         id: '/',
         name: 'Clínica — Gestão',
@@ -19,13 +19,12 @@ export default defineConfig({
         start_url: '/',
         scope: '/',
         categories: ['business', 'medical', 'productivity'],
-        background_color: '#f4f3ee',
+        background_color: '#0d0d0d',
         theme_color: '#163b2d',
         icons: [
           { src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
           { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
-          { src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
         ],
       },
       // Dados da API nunca são cacheados pelo service worker (financeiro/saúde).

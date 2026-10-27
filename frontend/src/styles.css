@@ -449,3 +449,18 @@ button.ghost.danger { color: var(--neg); border-color: color-mix(in srgb, var(--
 .date-strip { scrollbar-width: none; }
 .date-strip::-webkit-scrollbar { display: none; }
 .crash { min-height: 60dvh; display: grid; place-content: center; justify-items: center; gap: 10px; text-align: center; padding: 24px; }
+
+.center-pill { justify-self: center; }
+.paid-ok { display: grid; justify-items: center; gap: 6px; padding: 18px 0; text-align: center; }
+.paid-ok > span { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; background: var(--ok-soft); color: var(--ok); animation: pop .3s ease-out both; }
+.ok-box { background: var(--ok-soft); color: var(--ok); }
+
+/* ---------- Marca NERI ---------- */
+.splash-logo { width: min(64vw, 280px); height: auto; animation: pop .5s ease-out both; }
+.brand-logo { width: min(60vw, 240px); height: auto; margin-bottom: 10px; }
+.logo img { width: 62%; height: auto; display: block; }
+.drawer-title { display: flex; align-items: center; gap: 12px; }
+.drawer-title img { width: 30px; height: auto; flex: none; }
+.credit { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 14px 16px; border-radius: var(--radius); background: var(--hero); color: var(--hero-ink); font-size: 13px; }
+.credit span { opacity: .7; }
+.credit img { height: 26px; width: auto; }

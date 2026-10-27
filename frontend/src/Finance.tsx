@@ -186,7 +186,7 @@ function Accounts({ recv, pay, banks, onChanged, goBanks, error }: { recv: Tx[] 
       {list('A pagar', pay, 'out')}
       {settle && <SettleSheet tx={settle.tx} kind={settle.kind} banks={banks} goBanks={goBanks} onClose={() => setSettle(null)}
         onDone={() => { setSettle(null); onChanged(); toast(settle.kind === 'in' ? 'Recebimento registrado' : 'Pagamento registrado'); }} />}
-      {pix && <PixSheet tx={pix} onClose={() => setPix(null)} goBanks={() => { setPix(null); goBanks(); }} />}
+      {pix && <PixSheet tx={pix} onClose={() => setPix(null)} onPaid={() => { onChanged(); toast('Pagamento recebido'); }} goBanks={() => { setPix(null); goBanks(); }} />}
       {adding && <NewTransaction onClose={() => setAdding(false)} onDone={() => { setAdding(false); onChanged(); toast('Conta cadastrada'); }} />}
     </>
   );
@@ -221,14 +221,58 @@ function SettleSheet({ tx, kind, banks, onClose, onDone, goBanks }: { tx: Tx; ki
   );
 }
 
-// ---------- Cobrança por Pix (copia e cola + QR) ----------
-function PixSheet({ tx, onClose, goBanks }: { tx: Tx; onClose: () => void; goBanks: () => void }) {
-  const [data, setData] = useState<{ payload: string; amount: number; bank: string; keyMasked: string } | null>(null);
-  const [err, setErr] = useState<'none' | 'other' | ''>('');
+// ---------- Cobrança por Pix ----------
+// Com o Asaas configurado, cria uma cobrança que se confirma sozinha (a tela detecta o pagamento).
+// Sem ele, ou se o paciente não tem CPF, usa o Pix estático: copia e cola sem confirmação automática.
+type PixData = { payload: string; amount: number; provider: 'asaas' | 'static'; bank?: string; keyMasked?: string };
+
+function PixSheet({ tx, onClose, onPaid, goBanks }: { tx: Tx; onClose: () => void; onPaid: () => void; goBanks: () => void }) {
+  const [data, setData] = useState<PixData | null>(null);
+  const [state, setState] = useState<'loading' | 'ready' | 'paid' | 'nokey' | 'error'>('loading');
+  const [problem, setProblem] = useState('');
   const [copied, setCopied] = useState(false);
+
+  const loadStatic = () => {
+    setState('loading'); setProblem('');
+    api<{ payload?: string; amount: number; bank: string; keyMasked: string }>(`/finance/transactions/${tx.id}/pix`)
+      .then((r) => { if (r?.payload) { setData({ ...r, payload: r.payload, provider: 'static' }); setState('ready'); } else setState('error'); })
+      .catch((e) => setState(e instanceof ApiError && e.status === 409 ? 'nokey' : 'error'));
+  };
   useEffect(() => {
-    api<NonNullable<typeof data>>(`/finance/transactions/${tx.id}/pix`).then((r) => (r?.payload ? setData(r) : setErr('other'))).catch((e) => setErr(e instanceof ApiError && e.status === 409 ? 'none' : 'other'));
-  }, [tx.id]);
+    let off = false;
+    (async () => {
+      try {
+        const i = await api<{ asaas: { configured: boolean } }>('/integrations');
+        if (!i?.asaas?.configured) return loadStatic();
+        const r = await api<{ payload?: string; amount: number }>(`/finance/transactions/${tx.id}/charge`, { method: 'POST', json: {} });
+        if (off) return;
+        if (!r?.payload) return setState('error');
+        setData({ payload: r.payload, amount: r.amount, provider: 'asaas' }); setState('ready');
+      } catch (e) {
+        if (off) return;
+        if (e instanceof ApiError && e.status === 409 && (e.message === 'patient cpf required' || e.message === 'no patient')) {
+          setProblem(e.message === 'no patient'
+            ? 'Esta conta não está ligada a um paciente, então não dá para cobrar com confirmação automática.'
+            : 'Cadastre o CPF do paciente para cobrar com confirmação automática (o Asaas exige o CPF de quem paga).');
+          setState('nokey');
+        } else if (e instanceof ApiError && e.status === 502) { setProblem(`O Asaas recusou a cobrança${e.detail ? `: ${e.detail}` : '.'}`); setState('error'); }
+        else setState('error');
+      }
+    })();
+    return () => { off = true; };
+  }, [tx.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Enquanto a cobrança do Asaas está aberta, confere a cada 5 s se o pagamento já foi confirmado.
+  useEffect(() => {
+    if (state !== 'ready' || data?.provider !== 'asaas') return;
+    const id = setInterval(() => {
+      api<{ status: string }>(`/finance/transactions/${tx.id}/status`).then((s) => {
+        if (s?.status === 'paid') { setState('paid'); onPaid(); setTimeout(onClose, 2200); }
+      }).catch(() => {});
+    }, 5000);
+    return () => clearInterval(id);
+  }, [state, data?.provider]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const svg = data ? (() => { const q = qrcode(0, 'M'); q.addData(data.payload); q.make(); return q.createSvgTag({ cellSize: 5, margin: 0, scalable: true }); })() : '';
   async function copy() {
     try { await navigator.clipboard.writeText(data!.payload); setCopied(true); setTimeout(() => setCopied(false), 2200); } catch { /* sem permissão de área de transferência */ }
@@ -241,24 +285,33 @@ function PixSheet({ tx, onClose, goBanks }: { tx: Tx; onClose: () => void; goBan
   return (
     <Sheet title="Cobrar por Pix" onClose={onClose}>
       <div className="settle-head"><b>{tx.description}</b><strong>{brl(Number(tx.amount))}</strong></div>
-      {!data && !err && <ListSkeleton rows={2} />}
-      {err === 'none' && (
+      {state === 'loading' && <ListSkeleton rows={2} />}
+      {state === 'paid' && <div className="paid-ok" role="status"><span><Icon name="check" size={30} /></span><b>Pagamento recebido!</b><p className="muted">A conta foi baixada automaticamente.</p></div>}
+      {state === 'nokey' && (
         <>
-          <p className="muted">Para gerar o Pix, cadastre a chave Pix de uma conta em <b>Bancos</b>.</p>
-          <button className="primary" onClick={goBanks}>Ir para Bancos</button>
+          <p className="muted">{problem || 'Para gerar o Pix, cadastre a chave Pix de uma conta em Bancos.'}</p>
+          {problem ? <button className="primary" onClick={loadStatic}>Usar Pix estático (sem confirmação automática)</button> : <button className="primary" onClick={goBanks}>Ir para Bancos</button>}
         </>
       )}
-      {err === 'other' && <p role="alert" className="err">Não foi possível gerar o Pix agora. Tente novamente.</p>}
-      {data && (
+      {state === 'error' && (
         <>
+          <p role="alert" className="err">{problem || 'Não foi possível gerar o Pix agora. Tente novamente.'}</p>
+          <button className="ghost" onClick={loadStatic}>Usar Pix estático</button>
+        </>
+      )}
+      {state === 'ready' && data && (
+        <>
+          <span className={`pill ${data.provider === 'asaas' ? 'ok' : 'warn'} center-pill`}>{data.provider === 'asaas' ? 'Confirmação automática' : 'Pix estático'}</span>
           <div className="qr" role="img" aria-label="QR Code do Pix" dangerouslySetInnerHTML={{ __html: svg }} />
-          <p className="muted center">Destino: {data.bank} · chave {data.keyMasked}</p>
+          {data.provider === 'static' && <p className="muted center">Destino: {data.bank} · chave {data.keyMasked}</p>}
           <textarea className="pix-code" readOnly rows={4} value={data.payload} aria-label="Pix copia e cola" onFocus={(e) => e.currentTarget.select()} />
           <div className="actions">
             <button className="primary" onClick={copy}><Icon name={copied ? 'check' : 'copy'} size={18} />{copied ? 'Copiado' : 'Copiar código'}</button>
             <button className="ghost" onClick={share}><Icon name="share" size={18} />Enviar</button>
           </div>
-          <p className="muted note-box">Este Pix é estático: o sistema não detecta o pagamento sozinho. Quando o dinheiro cair na conta, toque em <b>Receber</b> para dar baixa.</p>
+          {data.provider === 'asaas'
+            ? <p className="muted note-box ok-box">Assim que o paciente pagar, esta conta é baixada sozinha. Você pode fechar esta janela: a baixa acontece mesmo assim.</p>
+            : <p className="muted note-box">Este Pix é estático: o sistema não detecta o pagamento sozinho. Quando o dinheiro cair na conta, toque em <b>Receber</b> para dar baixa.</p>}
         </>
       )}
     </Sheet>
@@ -286,6 +339,7 @@ function NewTransaction({ onClose, onDone }: { onClose: () => void; onDone: () =
 
 // ---------- Bancos ----------
 function Banks({ banks, onChanged }: { banks: ReturnType<typeof useLoad<Bank[]>>; onChanged: () => void }) {
+  const integ = useLoad<{ asaas: { configured: boolean; sandbox: boolean } }>('/integrations');
   const [adding, setAdding] = useState(false);
   const [edit, setEdit] = useState<Bank | null>(null);
   const toast = useToast();
@@ -316,7 +370,7 @@ function Banks({ banks, onChanged }: { banks: ReturnType<typeof useLoad<Bank[]>>
           </button>
         </li>
       ))}</ul>
-      <HowItWorks />
+      <HowItWorks auto={integ.data?.asaas ?? null} />
       {adding && <BankSheet onClose={() => setAdding(false)} onDone={(m) => { setAdding(false); onChanged(); toast(m); }} />}
       {edit && <BankSheet bank={edit} onClose={() => setEdit(null)} onDone={(m) => { setEdit(null); onChanged(); toast(m); }} />}
     </>
@@ -356,11 +410,13 @@ function BankSheet({ bank, onClose, onDone }: { bank?: Bank; onClose: () => void
 }
 
 // Como os pagamentos entram hoje e o que vem depois (honesto sobre o que é manual).
-function HowItWorks() {
+function HowItWorks({ auto }: { auto: { configured: boolean; sandbox: boolean } | null }) {
   const rows: { icon: IconName; title: string; text: string; state: string; ok?: boolean }[] = [
     { icon: 'qr', title: 'Pix copia e cola e QR Code', text: 'Gere a cobrança em Contas → Cobrar por Pix e envie ao paciente. Cai direto na sua conta, sem taxa de intermediário.', state: 'Disponível', ok: true },
     { icon: 'wallet', title: 'Cartão, dinheiro e transferência', text: 'Dê baixa em Receber escolhendo a conta onde o valor entrou (maquininha, caixa ou banco).', state: 'Registro manual', ok: true },
-    { icon: 'bank', title: 'Confirmação automática', text: 'Com um provedor de pagamentos (Pix por API, boleto, link de cartão), o sistema recebe o aviso do pagamento e dá a baixa sozinho.', state: 'Próxima etapa' },
+    auto?.configured
+      ? { icon: 'bank', title: 'Confirmação automática (Asaas)', text: 'Cobrar por Pix cria a cobrança no Asaas: quando o paciente paga, a conta é baixada sozinha e a tarifa é lançada. O dinheiro cai na conta digital do Asaas (aparece acima).', state: auto.sandbox ? 'Ativa · modo teste' : 'Ativa', ok: true }
+      : { icon: 'bank', title: 'Confirmação automática (Asaas)', text: 'Cobra por Pix e dá a baixa sozinho quando o paciente paga. Falta conectar a conta do Asaas: o proprietário faz isso em Configurações → Pagamentos.', state: 'Não conectado' },
   ];
   return (
     <section className="card">

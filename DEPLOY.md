@@ -91,3 +91,21 @@ O Netlify guarda cada deploy: em **Deploys** escolha um anterior e **Publish dep
 - **Bancos:** em **Financeiro → Bancos** o proprietário/gerente cadastra as contas onde o dinheiro cai (banco, tipo, final da conta, saldo atual e chave Pix). Não se guarda senha nem número completo de conta; a chave Pix fica cifrada no banco (mesma `ENCRYPTION_KEY` dos dados sensíveis) e as telas só mostram uma versão mascarada. Ao dar baixa em uma conta (Receber/Pagar) escolhe-se a conta; o saldo de cada banco = saldo inicial + recebimentos − pagamentos registrados nela.
 - **Pix copia e cola/QR:** em **Financeiro → Contas → Cobrar por Pix** gera-se um BR Code estático com o valor, na chave da conta padrão (ou escolhida). É estático: o sistema **não** detecta o pagamento; a baixa continua manual ("Receber").
 - **Esquema do banco:** `backend/src/schema.js` acrescenta, uma vez e só se faltarem, as colunas novas (`bank_accounts.*`, `users.last_seen_at`); `db/schema.sql` já as traz para instalações novas. Nada é apagado ou alterado nos dados existentes.
+
+## Pix com confirmação automática (Asaas)
+
+Opcional. Sem estas variáveis o app continua cobrando por Pix **estático** (sem confirmação automática).
+
+| Variável | Valor |
+|---|---|
+| `ASAAS_API_KEY` | chave de API do Asaas (sandbox: `$aact_hmlg_…`; produção: `$aact_prod_…`). Marque como secreta. |
+| `ASAAS_WEBHOOK_TOKEN` | segredo seu, de 32 a 255 caracteres, sem espaços (ex.: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`). Marque como secreta. |
+| `ASAAS_ENV` | `sandbox` (padrão, seguro) ou `production` |
+
+1. Comece pelo **sandbox**: crie a conta de testes no Asaas, gere a chave e cadastre as variáveis acima no Netlify; faça um novo deploy.
+2. No Asaas, em **Integrações → Webhooks**, cadastre a URL `https://SEU-SITE.netlify.app/api/webhooks/asaas` (também aparece em Configurações → Pagamentos), o mesmo segredo em "Token de autenticação" e os eventos de **cobrança** (o app só age em `PAYMENT_RECEIVED`). O Asaas exige resposta 200 em até 10 s e pausa a fila após 15 falhas seguidas.
+3. Em **Configurações → Pagamentos (Asaas)**, use "Testar conexão".
+4. Em Financeiro → Contas → Cobrar por Pix: o app cria cliente e cobrança no Asaas (precisa do **CPF do paciente**), mostra o QR/copia e cola e detecta o pagamento sozinho. O aviso do Asaas dá baixa na conta, a coloca na conta "Asaas (conta digital)" (em Bancos) e lança a tarifa como despesa ("Tarifa Asaas"). Avisos repetidos não duplicam nada.
+5. Só depois de testar no sandbox troque `ASAAS_ENV` para `production` com a chave de produção.
+
+Observações: as credenciais são por implantação (uma clínica por site). O CPF e o nome do paciente são enviados ao Asaas (fica registrado na auditoria como `asaas.customer_created`); inclua isso na política de privacidade. O dinheiro cai primeiro na conta do Asaas; confira as regras e tarifas de transferência para o seu banco.

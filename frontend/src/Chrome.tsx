@@ -54,9 +54,8 @@ export function Splash() {
   if (!show) return null;
   return (
     <div className="splash" aria-hidden="true">
-      <span className="logo big"><svg viewBox="0 0 24 24" width="40" height="40"><path d="M12 5v14M5 12h14" /></svg></span>
-      <b>Clínica</b>
-      <span>Gestão na palma da mão</span>
+      <img className="splash-logo" src="/neri-logo.png" alt="" />
+      <span>Gestão da clínica na palma da mão</span>
     </div>
   );
 }
