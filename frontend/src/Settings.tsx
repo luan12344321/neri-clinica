@@ -3,6 +3,7 @@ import { ApiError, api } from './api';
 import { AddForm, errText, type Field } from './Cadastros';
 import { useLoad } from './hooks';
 import { Icon } from './Icon';
+import { seenText, usePresence } from './Presence';
 import { Avatar, Empty, ListSkeleton, PageHead, ROLE_LABEL, Sheet, useInstall, useRole, useToast, type Role } from './ui';
 
 export type Me = { name: string; email: string; role: Role; clinic: string };
@@ -78,6 +79,8 @@ function InstallCard() {
 
 function Team() {
   const list = useLoad<Member[]>('/team');
+  const presence = usePresence(true);
+  const seen = (id: string) => presence.data?.find((p) => p.id === id);
   const [adding, setAdding] = useState(false);
   const [edit, setEdit] = useState<Member | null>(null);
   const toast = useToast();
@@ -102,8 +105,8 @@ function Team() {
             <div className="row-btn static"><Avatar name={m.name} /><span className="grow"><b>{m.name}</b><span className="muted">{m.email}</span></span><span className="pill ok">{ROLE_LABEL.owner}</span></div>
           ) : (
             <button className="row-btn" onClick={() => setEdit(m)}>
-              <Avatar name={m.name} />
-              <span className="grow"><b>{m.name}</b><span className="muted">{m.email}</span></span>
+              <span className="av-wrap"><Avatar name={m.name} />{seen(m.id)?.online && <i className="on-dot" />}</span>
+              <span className="grow"><b>{m.name}</b><span className="muted">{m.email}</span>{seen(m.id) && !m.revoked && <span className={`seen ${seen(m.id)!.online ? 'on' : ''}`}>{seenText(seen(m.id)!)}</span>}</span>
               {m.revoked ? <span className="pill warn">Sem acesso</span> : <span className="pill">{ROLE_LABEL[m.role]}</span>}
             </button>
           )}

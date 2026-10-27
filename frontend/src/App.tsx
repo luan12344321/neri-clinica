@@ -6,6 +6,7 @@ import { Icon, type IconName } from './Icon';
 import { Cadastros, NewAppointment, type Section } from './Cadastros';
 import { Empty, ListSkeleton, RoleProvider, ToastProvider, useInstall, useRole } from './ui';
 import { Settings, type Me } from './Settings';
+import { PresenceButton } from './Presence';
 
 type View = 'inicio' | 'agenda' | 'financeiro' | 'estoque' | 'sara' | 'pacientes' | 'procedimentos' | 'produtos' | 'mensagens' | 'config';
 
@@ -46,12 +47,21 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 }
 
 function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
-  const { isManager } = useRole();
+  const { isManager, isOwner } = useRole();
   const [view, setView] = useState<View>('inicio');
   const [open, setOpen] = useState(false);
   // Estoque atual (não o aviso gravado pela rotina): some assim que o produto é reposto.
   const restock = useLoad<any[]>('/stock/restock');
   const menuBtn = useRef<HTMLButtonElement>(null);
+
+  // Sinal de vida: avisa o servidor que este usuário está com o app aberto (alimenta o painel "Equipe" do proprietário).
+  useEffect(() => {
+    const ping = () => { if (document.visibilityState === 'visible') api('/presence/ping', { method: 'POST', json: {} }).catch(() => {}); };
+    ping();
+    const id = setInterval(ping, 45_000);
+    document.addEventListener('visibilitychange', ping);
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', ping); };
+  }, []);
   useEffect(() => { restock.reload(); }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -70,6 +80,7 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
         <button ref={menuBtn} className="icon-btn menu-btn" aria-label="Abrir menu" aria-expanded={open} onClick={() => setOpen(true)}><Icon name="menu" /></button>
         <h1>{TITLE_OVERRIDE[view] ?? TITLES[view]}</h1>
         <div className="top-actions">
+          {isOwner && <PresenceButton />}
           <button className="icon-btn" aria-label={nAlerts ? `${nAlerts} alertas de estoque` : 'Sem alertas'} onClick={() => go('estoque')}>
             <Icon name="bell" />{nAlerts > 0 && <span className="dot">{nAlerts}</span>}
           </button>

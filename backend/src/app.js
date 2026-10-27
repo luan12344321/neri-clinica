@@ -44,6 +44,7 @@ const owner = { onRequest: [app.auth, async (req, reply) => {
 await app.register((await import('./cadastros.js')).default);
 await app.register(googleRoutes);
 await app.register((await import('./team.js')).default);
+await app.register((await import('./presence.js')).default);
 await app.register((await import('./prontuario.js')).default);
 const clinic = (req) => req.user.clinicId;
 

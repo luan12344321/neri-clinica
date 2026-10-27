@@ -18,6 +18,7 @@ CREATE TABLE users (
   google_refresh_token_enc text,          -- criptografado (AES-GCM) na aplicação
   google_calendar_id text,                -- NULL = 'primary'
   google_sync_token text,                 -- cursor incremental do Google Calendar
+  last_seen_at timestamptz,               -- último sinal do app aberto (presença; ver backend/src/presence.js)
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
