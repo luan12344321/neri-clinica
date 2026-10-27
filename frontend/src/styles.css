@@ -578,3 +578,10 @@ button.ghost.danger { color: var(--neg); border-color: color-mix(in srgb, var(--
 .faixa { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .faixa select { width: auto; min-width: 96px; }
 @media (max-width: 480px) { .faixas { padding-left: 0; } }
+
+.tl-out { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); display: grid; gap: 6px; }
+.tl-out p { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.tl-out > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.tl-out button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 99px; background: var(--bg); color: var(--ink); font-size: 13px; }
+.tl-out button.done { color: var(--muted); }
+.tl-out button .ico { color: var(--ok); }
