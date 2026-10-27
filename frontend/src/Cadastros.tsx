@@ -185,11 +185,12 @@ export function NewAppointment({ onCreated }: { onCreated: () => void }) {
 }
 
 // ---------- Seções do menu ----------
+export type Focus = { id: string; appt?: { id: string; label: string } };
 export type Section = 'pacientes' | 'procedimentos' | 'estoque' | 'mensagens';
-export function Cadastros({ section, autoOpen = false }: { section: Section; autoOpen?: boolean }) {
+export function Cadastros({ section, autoOpen = false, focus = null, onFinish }: { section: Section; autoOpen?: boolean; focus?: Focus | null; onFinish?: () => void }) {
   return (
     <>
-      {section === 'pacientes' && <Patients autoOpen={autoOpen} />}
+      {section === 'pacientes' && <Patients autoOpen={autoOpen} focus={focus} onFinish={onFinish} />}
       {section === 'procedimentos' && <Procedures />}
       {section === 'estoque' && <Products />}
       {section === 'mensagens' && <Messages />}
@@ -197,15 +198,15 @@ export function Cadastros({ section, autoOpen = false }: { section: Section; aut
   );
 }
 
-function Patients({ autoOpen = false }: { autoOpen?: boolean }) {
+function Patients({ autoOpen = false, focus = null, onFinish }: { autoOpen?: boolean; focus?: Focus | null; onFinish?: () => void }) {
   const [search, setSearch] = useState('');
   const [term, setTerm] = useState('');
   useEffect(() => { const t = setTimeout(() => setTerm(search.trim()), 250); return () => clearTimeout(t); }, [search]);
   const l = useList<any[]>(`/patients?search=${encodeURIComponent(term)}`);
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(focus?.id ?? null);
   const [adding, setAdding] = useState(autoOpen);
   const toast = useToast();
-  if (open) return <PatientDetail id={open} onClose={() => setOpen(null)} />;
+  if (open) return <PatientDetail id={open} onClose={() => setOpen(null)} session={focus?.id === open ? focus.appt : undefined} onFinish={onFinish} />;
   return (
     <>
       <PageHead title="Pacientes" hint={l.data ? `${l.data.length} ${term ? 'encontrado(s)' : 'cadastrado(s)'}` : undefined}>
@@ -245,7 +246,14 @@ function Patients({ autoOpen = false }: { autoOpen?: boolean }) {
 const fmtCpf = (d: string) => d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
 
 // Ficha clínica: CPF em claro e prontuário. A API só entrega a perfis clínicos e registra cada acesso.
-function PatientDetail({ id, onClose }: { id: string; onClose: () => void }) {
+function PatientDetail({ id, onClose, session, onFinish }: { id: string; onClose: () => void; session?: { id: string; label: string }; onFinish?: () => void }) {
+  const [finishing, setFinishing] = useState(false);
+  async function finish() {
+    if (!session) return;
+    setFinishing(true);
+    try { await api(`/appointments/${session.id}/complete`, { method: 'POST', json: {} }); toast('Atendimento concluído'); onFinish?.(); }
+    catch { toast('Não foi possível concluir. Tente novamente.'); } finally { setFinishing(false); }
+  }
   const p = useLoad<any>(`/patients/${id}`);
   const recs = useLoad<any[]>(`/patients/${id}/records`);
   const [adding, setAdding] = useState(false);
@@ -254,6 +262,12 @@ function PatientDetail({ id, onClose }: { id: string; onClose: () => void }) {
   return (
     <>
       <button className="back" onClick={onClose}><Icon name="back" size={18} />Pacientes</button>
+      {session && (
+        <section className="card session">
+          <div className="grow"><span className="pill ok">Atendimento em andamento</span><b>{session.label}</b></div>
+          <button className="primary" disabled={finishing} onClick={finish}>{finishing ? 'Concluindo…' : 'Concluir atendimento'}</button>
+        </section>
+      )}
       {denied ? <section className="card"><Empty icon="alert" title="Sem acesso à ficha clínica" text="Seu perfil não tem permissão para ver dados clínicos." /></section> : (
         <>
           <Loading error={p.error} ready={!!p.data} rows={2} />

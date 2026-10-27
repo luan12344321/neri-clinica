@@ -142,3 +142,11 @@ test('painel do dia: traz os aniversariantes de hoje (o seed tem o Paciente 1 fa
   const other = (await t.call('GET', '/dashboard', { token: await t.tokenFor('b@demo.test') })).json;
   assert.deepEqual(other.birthdays, [], 'não vaza pacientes de outra clínica');
 });
+
+test('painel do dia: cada atendimento traz paciente e data de nascimento; o faturamento do dia conta o que foi concluído hoje', async () => {
+  const before = (await t.call('GET', '/dashboard', { token })).json;
+  assert.equal(before.todayRevenue, 0);
+  assert.ok(before.today[0].patient_id && /^\d{4}-\d{2}-\d{2}$/.test(before.today[0].birth_date));
+  await t.call('POST', `/appointments/${before.today[0].id}/complete`, { token });
+  assert.equal((await t.call('GET', '/dashboard', { token })).json.todayRevenue, 1200);
+});

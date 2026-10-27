@@ -3,7 +3,8 @@ import { useLoad } from './hooks';
 import { Area, AreaChart, Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { ApiError, api, brl, getToken, lastMonths, monthLabel, setToken, thisMonth } from './api';
 import { Icon, type IconName } from './Icon';
-import { AppointmentSheet, Cadastros, NewAppointment, RescheduleSheet, type Section } from './Cadastros';
+import { AppointmentSheet, Cadastros, NewAppointment, RescheduleSheet, type Focus, type Section } from './Cadastros';
+import { ApptSheet, DayTimeline, ageOf } from './Timeline';
 import { Avatar, Empty, ErrorBoundary, EyeToggle, ListSkeleton, RoleProvider, ToastProvider, mask, useHideValues, useRole } from './ui';
 import { Settings, type Me } from './Settings';
 import { PresenceButton } from './Presence';
@@ -75,10 +76,11 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
 
   const [finTab, setFinTab] = useState<FinTab>('resumo');
   const [autoPatient, setAutoPatient] = useState(false);
+  const [focus, setFocus] = useState<Focus | null>(null); // paciente (e atendimento) aberto a partir do Início
   const [quick, setQuick] = useState(false);
   const [booking, setBooking] = useState(false);
   const [fresh, setFresh] = useState(0); // muda quando algo é criado, para as telas recarregarem
-  const go = (v: View, tab?: FinTab) => { if (tab) setFinTab(tab); setAutoPatient(false); setView(v); setOpen(false); scrollTo({ top: 0 }); };
+  const go = (v: View, tab?: FinTab) => { if (tab) setFinTab(tab); setAutoPatient(false); setFocus(null); setView(v); setOpen(false); scrollTo({ top: 0 }); };
   const quickActions: QuickAction[] = [
     { icon: 'calendar', title: 'Agendar atendimento', hint: 'Escolha o dia e o horário', run: () => setBooking(true) },
     { icon: 'users', title: 'Cadastrar paciente', hint: 'Novo cadastro', run: () => { go('pacientes'); setAutoPatient(true); } },
@@ -105,13 +107,14 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
       </header>
 
       <main>
-        {view === 'inicio' && <Today key={fresh} name={me?.name} restock={restock.data ?? []} go={go} money={isManager} onBook={() => setBooking(true)} />}
+        {view === 'inicio' && <Today key={fresh} name={me?.name} restock={restock.data ?? []} go={go} money={isManager} onBook={() => setBooking(true)} onPatient={() => { go('pacientes'); setAutoPatient(true); }}
+          onStart={(patientId, appt) => { go('pacientes'); setFocus({ id: patientId, appt: appt ? { id: appt.id, label: `${appt.procedure ?? 'Atendimento'} · ${new Date(appt.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` } : undefined }); }} />}
         {view === 'config' && <Settings me={me} />}
         {view === 'agenda' && <Agenda key={fresh} />}
         {view === 'financeiro' && <Finance initialTab={finTab} onTab={setFinTab} />}
         {view === 'estoque' && <Stock go={go} />}
         {view === 'sara' && <Julia name={me?.name} />}
-        {(view === 'pacientes' || view === 'procedimentos' || view === 'mensagens') && <Cadastros section={view} autoOpen={autoPatient} />}
+        {(view === 'pacientes' || view === 'procedimentos' || view === 'mensagens') && <Cadastros section={view} autoOpen={autoPatient} focus={focus} onFinish={() => { go('inicio'); setFresh((n) => n + 1); }} />}
         {view === 'produtos' && <Cadastros section={'estoque' satisfies Section} />}
       </main>
 
@@ -188,21 +191,26 @@ const localYmd = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() +
 
 type Todo = { icon: IconName; text: string; hint?: string; tone?: 'bad'; run: () => void };
 
-// O "meu dia" em primeiro lugar: o que atender, o que está pendente e o que pede atenção. Dinheiro vem depois.
-function Today({ name, restock, go, money, onBook }: { name?: string; restock: any[]; go: (v: View, tab?: FinTab) => void; money: boolean; onBook: () => void }) {
+// O "meu dia": indicadores, quem é o próximo paciente, a agenda em linha do tempo e o que pede atenção. Dinheiro vem depois.
+function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
+  name?: string; restock: any[]; go: (v: View, tab?: FinTab) => void; money: boolean; onBook: () => void; onPatient: () => void;
+  onStart: (patientId: string, appt: any | null) => void;
+}) {
   const dash = useLoad<any>('/dashboard');
   const sum = useLoad<any>(money ? `/finance/summary?month=${thisMonth()}` : null);
   const recv = useLoad<any[]>(money ? '/finance/receivables' : null);
   const pay = useLoad<any[]>(money ? '/finance/payables' : null);
   const banks = useLoad<Bank[]>(money ? '/banks' : null);
+  const { isClinical } = useRole();
   const [busyId, setBusyId] = useState('');
   const [bump, setBump] = useState(0);
   const [moving, setMoving] = useState<any | null>(null);
+  const [open, setOpen] = useState<any | null>(null);
   const { hidden } = useHideValues();
 
   async function complete(id: string) {
     setBusyId(id);
-    try { await api(`/appointments/${id}/complete`, { method: 'POST', json: {} }); dash.reload(); sum.reload(); recv.reload(); banks.reload(); setBump((b) => b + 1); }
+    try { await api(`/appointments/${id}/complete`, { method: 'POST', json: {} }); setOpen(null); dash.reload(); sum.reload(); recv.reload(); banks.reload(); setBump((b) => b + 1); }
     finally { setBusyId(''); }
   }
   const d = dash.data, s = sum.data;
@@ -214,15 +222,16 @@ function Today({ name, restock, go, money, onBook }: { name?: string; restock: a
   const ended = (a: any) => new Date(a.ends_at ?? a.starts_at).getTime() < now;
   const next = pending.find((a) => !ended(a)) ?? null;
   const late = pending.filter(ended);
+  const patientsToday = new Set(today.map((a) => a.patient_id)).size;
   const todayStr = localYmd();
   const sumOf = (items: any[]) => items.reduce((acc, t) => acc + Number(t.amount), 0);
   const dueRecv = (recv.data ?? []).filter((t) => String(t.due_date).slice(0, 10) <= todayStr);
   const duePay = (pay.data ?? []).filter((t) => String(t.due_date).slice(0, 10) <= todayStr);
   const birthdays: { id: string; full_name: string }[] = d?.birthdays ?? [];
+  const goAgenda = () => document.getElementById('agenda-hoje')?.scrollIntoView({ behavior: 'smooth' });
 
   const todo: Todo[] = [
-    ...(late.length ? [{ icon: 'alert' as IconName, tone: 'bad' as const, text: `${late.length} atendimento(s) passaram do horário sem ser concluídos`, hint: late.map((a) => `${timeOf(a)} ${a.patient}`).join(' · '),
-      run: () => document.getElementById('agenda-hoje')?.scrollIntoView({ behavior: 'smooth' }) }] : []),
+    ...(late.length ? [{ icon: 'alert' as IconName, tone: 'bad' as const, text: `${late.length} atendimento(s) passaram do horário sem ser concluídos`, hint: late.map((a) => `${timeOf(a)} ${a.patient}`).join(' · '), run: goAgenda }] : []),
     ...(dueRecv.length ? [{ icon: 'receive' as IconName, text: `${dueRecv.length} conta(s) a receber vencendo hoje ou vencida(s)`, hint: mask(brl(sumOf(dueRecv)), hidden), run: () => go('financeiro', 'contas') }] : []),
     ...(duePay.length ? [{ icon: 'pay' as IconName, text: `${duePay.length} conta(s) a pagar vencendo hoje ou vencida(s)`, hint: mask(brl(sumOf(duePay)), hidden), run: () => go('financeiro', 'contas') }] : []),
     ...(restock.length ? [{ icon: 'box' as IconName, text: `${restock.length} produto(s) para repor`, hint: restock.map((p) => p.name).slice(0, 3).join(', '), run: () => go('estoque') }] : []),
@@ -243,47 +252,71 @@ function Today({ name, restock, go, money, onBook }: { name?: string; restock: a
     : delta !== null && delta !== 0
       ? { icon: 'pulse' as IconName, text: `Faturamento ${pct(Math.abs(delta))}% ${delta > 0 ? 'acima' : 'abaixo'} do mês anterior.`, cta: 'Ver resumo', run: () => go('financeiro', 'resumo') }
       : null;
-  const quick: { icon: IconName; label: string; run: () => void }[] = [
-    { icon: 'calendar', label: 'Agendar', run: onBook },
-    { icon: 'users', label: 'Pacientes', run: () => go('pacientes') },
-    ...(money ? [{ icon: 'receive' as IconName, label: 'Receber', run: () => go('financeiro', 'contas') }, { icon: 'bank' as IconName, label: 'Bancos', run: () => go('financeiro', 'bancos') }]
-      : [{ icon: 'box' as IconName, label: 'Estoque', run: () => go('estoque') }, { icon: 'syringe' as IconName, label: 'Procedimentos', run: () => go('procedimentos') }]),
+
+  const kpis: { icon: IconName; label: string; value: string; hot?: boolean; eye?: boolean }[] = [
+    { icon: 'users', label: 'Pacientes hoje', value: String(patientsToday) },
+    { icon: 'check', label: 'Atendimentos concluídos', value: `${doneToday} de ${today.length}` },
+    { icon: 'alert', label: 'Pendências', value: String(todo.length), hot: todo.length > 0 },
+    ...(money ? [{ icon: 'wallet' as IconName, label: 'Faturamento do dia', value: mask(brl(d?.todayRevenue ?? 0), hidden), eye: true }] : []),
   ];
+  const quick: { icon: IconName; label: string; run: () => void }[] = [
+    { icon: 'calendar', label: 'Novo agendamento', run: onBook },
+    { icon: 'users', label: 'Novo paciente', run: onPatient },
+    money ? { icon: 'receive', label: 'Registrar recebimento', run: () => go('financeiro', 'contas') } : { icon: 'box', label: 'Ver estoque', run: () => go('estoque') },
+  ];
+  const nextAge = next ? ageOf(next.birth_date) : null;
 
   return (
     <div className="dash">
       <section className="hello span-all">
         <h2>{greeting()}{first ? `, ${first}` : ''}</h2>
         <p className="muted">{new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
-        {d && (
-          <div className="chips" aria-label="Resumo do dia">
-            <span>{today.length} atendimento(s)</span>
-            <span>{doneToday} concluído(s)</span>
-            <span className={todo.length ? 'hot' : ''}>{todo.length} pendência(s)</span>
-          </div>
-        )}
       </section>
       <div className="span-all"><Status error={dash.error || sum.error} loading={!d || (money && !s)} /></div>
       {d && (!money || s) && (
         <>
+          <section className={`top-kpis n${kpis.length} span-all`} aria-label="Resumo do dia">
+            {kpis.map((k) => (
+              <div key={k.label} className={`tk${k.hot ? ' hot' : ''}`}>
+                <span className="tk-ico"><Icon name={k.icon} size={18} /></span>
+                <strong>{k.value}</strong>
+                <span className="tk-label">{k.label}{k.eye && <EyeToggle className="inline small" />}</span>
+              </div>
+            ))}
+          </section>
+
           <div className="day-grid span-all">
             <section className="next-card g-next">
-              <span className="next-label">Próximo atendimento</span>
+              <span className="next-label">Próximo paciente</span>
               {next ? (
                 <>
                   <div className="next-main">
-                    <Avatar name={next.patient} size={46} />
-                    <div className="grow"><b>{next.patient}</b><span>{next.procedure ?? 'Sem procedimento'}</span></div>
+                    <Avatar name={next.patient} size={64} />
+                    <div className="grow">
+                      <b>{next.patient}</b>
+                      <span>{[nextAge !== null ? `${nextAge} anos` : null, next.procedure ?? 'Sem procedimento'].filter(Boolean).join(' · ')}</span>
+                    </div>
                     <span className="next-time"><Icon name="calendar" size={16} />{timeOf(next)}</span>
                   </div>
                   <div className="next-actions">
-                    <button className="ghost" onClick={() => setMoving(next)}>Reagendar</button>
-                    <button className="primary" disabled={busyId === next.id} onClick={() => complete(next.id)}>Concluir</button>
+                    {isClinical ? (
+                      <>
+                        <button className="primary" onClick={() => onStart(next.patient_id, next)}>Iniciar atendimento</button>
+                        <button className="ghost" onClick={() => onStart(next.patient_id, null)}>Ver prontuário</button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="primary" disabled={busyId === next.id} onClick={() => complete(next.id)}>Concluir</button>
+                        <button className="ghost" onClick={() => setMoving(next)}>Reagendar</button>
+                      </>
+                    )}
                   </div>
+                  {isClinical && <button className="next-link" onClick={() => setMoving(next)}>Reagendar este atendimento</button>}
                 </>
-              ) : <p className="next-empty">{today.length === 0 ? 'Nenhum atendimento para hoje.' : late.length ? 'Os atendimentos restantes de hoje já passaram do horário.' : 'Todos os atendimentos de hoje foram concluídos.'}</p>}
+              ) : <p className="next-empty">{today.length === 0 ? 'Nenhum paciente para hoje.' : late.length ? 'Os atendimentos restantes de hoje já passaram do horário.' : 'Todos os atendimentos de hoje foram concluídos.'}</p>}
             </section>
 
+            <aside className="g-side">
             {todo.length > 0 ? (
               <section className="card attn g-attn" id="pendencias">
                 <div className="attn-head"><h2>Precisa de atenção</h2><span className="badge" aria-label={`${todo.length} pendência(s)`}>{todo.length}</span></div>
@@ -304,27 +337,16 @@ function Today({ name, restock, go, money, onBook }: { name?: string; restock: a
               </section>
             )}
 
-            <section className="card g-agenda" id="agenda-hoje">
-              <div className="between"><h2>Agenda de hoje</h2><button className="link" onClick={() => go('agenda')}>Ver agenda completa</button></div>
-              {today.length === 0 ? <Empty icon="calendar" title="Dia livre" text="Nenhum atendimento hoje."><button className="primary sm" onClick={onBook}>Agendar</button></Empty> : (
-                <ul className="rows">
-                  {today.map((a: any) => (
-                    <li key={a.id}>
-                      <div>
-                        <b>{timeOf(a)}</b>{' '}{a.patient}
-                        <div className="muted">{a.procedure ?? 'Sem procedimento'}</div>
-                      </div>
-                      {a.status === 'done' ? <span className="pill ok">Concluído</span>
-                        : <button className="primary sm" disabled={busyId === a.id} onClick={() => complete(a.id)}>Concluir</button>}
-                    </li>
-                  ))}
-                </ul>
-              )}
+            <section className="card quick-card g-quick" aria-label="Ações rápidas">
+              <h2>Ações rápidas</h2>
+              <div className="qgrid">
+                {quick.map((q) => <button key={q.label} onClick={q.run}><span><Icon name={q.icon} size={22} /></span><b>{q.label}</b></button>)}
+              </div>
             </section>
+            </aside>
 
-            <section className="quick-actions g-quick" aria-label="Ações rápidas">
-              {quick.map((q) => <button key={q.label} onClick={q.run}><span><Icon name={q.icon} size={22} /></span>{q.label}</button>)}
-            </section>
+            <DayTimeline appts={today} onOpen={setOpen} onBook={onBook} onSeeAll={() => go('agenda')} />
+
           </div>
 
           {money && s && (
@@ -412,6 +434,9 @@ function Today({ name, restock, go, money, onBook }: { name?: string; restock: a
           <GoogleCard />
         </>
       )}
+      {open && <ApptSheet appt={open} clinical={isClinical} busy={busyId === open.id} onClose={() => setOpen(null)}
+        onStart={() => { const a = open; setOpen(null); onStart(a.patient_id, a); }} onChart={() => { const a = open; setOpen(null); onStart(a.patient_id, null); }}
+        onComplete={() => complete(open.id)} onMove={() => { setMoving(open); setOpen(null); }} />}
       {moving && <RescheduleSheet appt={moving} onClose={() => setMoving(null)} onDone={() => { setMoving(null); dash.reload(); }} />}
     </div>
   );

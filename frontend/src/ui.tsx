@@ -70,11 +70,11 @@ export function Avatar({ name, size = 42 }: { name: string; size?: number }) {
 // ---------- Perfil do usuário logado ----------
 export type Role = 'owner' | 'manager' | 'professional' | 'reception';
 export const ROLE_LABEL: Record<Role, string> = { owner: 'Proprietário(a)', manager: 'Gerente', professional: 'Profissional', reception: 'Recepção' };
-type RoleInfo = { role: Role | null; isManager: boolean; isOwner: boolean };
-const RoleCtx = createContext<RoleInfo>({ role: null, isManager: false, isOwner: false });
+type RoleInfo = { role: Role | null; isManager: boolean; isOwner: boolean; isClinical: boolean };
+const RoleCtx = createContext<RoleInfo>({ role: null, isManager: false, isOwner: false, isClinical: false });
 export const useRole = () => useContext(RoleCtx);
 export const RoleProvider = ({ role, children }: { role: Role | null; children: ReactNode }) => (
-  <RoleCtx.Provider value={{ role, isManager: role === 'owner' || role === 'manager', isOwner: role === 'owner' }}>{children}</RoleCtx.Provider>
+  <RoleCtx.Provider value={{ role, isManager: role === 'owner' || role === 'manager', isOwner: role === 'owner', isClinical: role === 'owner' || role === 'manager' || role === 'professional' }}>{children}</RoleCtx.Provider>
 );
 
 // ---------- Instalação como aplicativo (PWA) ----------

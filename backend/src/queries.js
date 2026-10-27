@@ -2,8 +2,8 @@
 import { q } from './db.js';
 
 export async function getDashboard(clinicId) {
-  const [today, revenue, top, birthdays] = await Promise.all([
-    q(`SELECT a.id, a.starts_at, a.ends_at, a.status, p.full_name AS patient, pr.name AS procedure
+  const [today, revenue, top, birthdays, [day]] = await Promise.all([
+    q(`SELECT a.id, a.starts_at, a.ends_at, a.status, a.patient_id, to_char(p.birth_date, 'YYYY-MM-DD') AS birth_date, p.full_name AS patient, pr.name AS procedure
        FROM appointments a JOIN patients p ON p.id=a.patient_id
        LEFT JOIN procedures pr ON pr.id=a.procedure_id
        JOIN clinics c ON c.id=a.clinic_id
@@ -17,8 +17,12 @@ export async function getDashboard(clinicId) {
        WHERE p.clinic_id=$1 AND p.birth_date IS NOT NULL
          AND to_char(p.birth_date, 'MMDD') = to_char(now() AT TIME ZONE c.timezone, 'MMDD')
        ORDER BY p.full_name LIMIT 20`, [clinicId]),
+    // faturamento do dia (receita reconhecida hoje, no fuso da clínica)
+    q(`SELECT COALESCE(SUM(t.amount), 0)::float AS revenue FROM transactions t JOIN clinics c ON c.id=t.clinic_id
+       WHERE t.clinic_id=$1 AND t.type='income' AND t.status<>'canceled'
+         AND t.competence_date = (now() AT TIME ZONE c.timezone)::date`, [clinicId]),
   ]);
-  return { today, birthdays, revenueByMonth: revenue, topProcedures: top };
+  return { today, birthdays, todayRevenue: day.revenue, revenueByMonth: revenue, topProcedures: top };
 }
 
 export const getRevenueByMonth = (clinicId, months) =>

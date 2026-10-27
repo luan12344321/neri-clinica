@@ -31,7 +31,8 @@ test('funcionário não vê dinheiro nem a equipe: financeiro, Julia e /team dã
     ['POST', '/sara/chat'], ['POST', '/sara/test'], ['GET', '/team'], ['POST', '/team']]) {
     assert.equal((await t.call(m, u, { token, body: { message: 'oi' } })).status, 403, `${m} ${u}`);
   }
-  assert.deepEqual((await t.call('GET', '/dashboard', { token })).json.revenueByMonth, []);
+  const dash = (await t.call('GET', '/dashboard', { token })).json;
+  assert.deepEqual([dash.revenueByMonth, dash.todayRevenue], [[], null]);
   assert.ok((await t.call('GET', '/dashboard', { token: owner })).json.revenueByMonth.length > 0, 'o dono continua vendo a receita');
 });
 

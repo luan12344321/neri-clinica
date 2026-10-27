@@ -90,7 +90,7 @@ app.post('/me/password', { ...guard, config: { rateLimit: { max: 5, timeWindow: 
 // ---------- Dashboard / agenda ----------
 app.get('/dashboard', guard, async (req) => {
   const d = await getDashboard(clinic(req));
-  return MANAGERS.includes(req.user.role) ? d : { ...d, revenueByMonth: [] };
+  return MANAGERS.includes(req.user.role) ? d : { ...d, revenueByMonth: [], todayRevenue: null };
 });
 
 app.get('/appointments', guard, async (req) => {
