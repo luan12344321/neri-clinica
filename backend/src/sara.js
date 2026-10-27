@@ -34,7 +34,7 @@ const toolDefs = TOOLS.map(({ run, ...def }) => def);
 export async function askSara({ clinicId, userId, message, conversationId = randomUUID(), client = (defaultClient ??= new Anthropic()) }) {
   const history = await q(
     `SELECT role, content FROM (SELECT id, role, content FROM sara_messages
-       WHERE conversation_id=$1 AND clinic_id=$2 ORDER BY id DESC LIMIT 20) t ORDER BY id`, [conversationId, clinicId]);
+       WHERE conversation_id=$1 AND clinic_id=$2 AND user_id=$3 ORDER BY id DESC LIMIT 20) t ORDER BY id`, [conversationId, clinicId, userId]);
   const messages = [...history, { role: 'user', content: message }];
   const save = (role, content, usage) => q(
     `INSERT INTO sara_messages (clinic_id,user_id,conversation_id,role,content,tokens_in,tokens_out)

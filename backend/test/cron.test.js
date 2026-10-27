@@ -1,16 +1,19 @@
-import { test } from 'node:test';
+import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import cron from 'node-cron';
+import { setup } from './helpers.js';
 
-// Garante que as expressões e o fuso usados em jobs.js continuam válidos na versão instalada do node-cron.
-const SCHEDULES = ['0 9 * * *', '*/15 * * * *', '5 * * * *', '0 6 1 * *', '* * * * *', '*/5 * * * *'];
+let t;
+before(async () => { t = await setup(); });
+after(() => t.close());
+beforeEach(() => t.reset());
 
-test('expressões cron de jobs.js são válidas', () => {
-  for (const s of SCHEDULES) assert.equal(cron.validate(s), true, s);
-});
-
-test('agendar com timezone e parar não lança erro', () => {
-  const task = cron.schedule('0 9 * * *', () => {}, { timezone: 'America/Sao_Paulo' });
-  assert.ok(task);
-  task.stop();
+test('cron/tick: fechado sem segredo, recusa token errado e aceita o certo', async () => {
+  delete process.env.CRON_SECRET;
+  assert.equal((await t.app.inject({ method: 'GET', url: '/cron/tick' })).statusCode, 503);
+  process.env.CRON_SECRET = 'segredo-de-teste';
+  assert.equal((await t.app.inject({ method: 'GET', url: '/cron/tick' })).statusCode, 401);
+  assert.equal((await t.app.inject({ method: 'GET', url: '/cron/tick', headers: { authorization: 'Bearer errado-errado' } })).statusCode, 401);
+  const ok = await t.app.inject({ method: 'GET', url: '/cron/tick', headers: { authorization: 'Bearer segredo-de-teste' } });
+  assert.equal(ok.statusCode, 200);
+  delete process.env.CRON_SECRET;
 });

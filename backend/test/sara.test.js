@@ -92,3 +92,16 @@ test('rota /sara/chat: valida a mensagem e exige login', async () => {
   assert.equal((await t.call('POST', '/sara/chat', { token, body: { message: '' } })).status, 400);
   assert.equal((await t.call('POST', '/sara/chat', { token, body: { message: 'x'.repeat(2001) } })).status, 400);
 });
+
+test('histórico: outro usuário não lê a conversa mesmo sabendo o conversationId', async () => {
+  const [a] = await t.sql('SELECT id FROM users WHERE clinic_id=$1 LIMIT 1', [A]);
+  const [other] = await t.sql('SELECT id FROM users WHERE id<>$1 LIMIT 1', [a.id]);
+  const conversationId = '11111111-1111-4111-8111-111111111111';
+  await askSara({ clinicId: A, userId: a.id, message: 'segredo da conversa', conversationId, client: fakeClient([text('ok')]) });
+  const c = fakeClient([text('ok')]);
+  await askSara({ clinicId: A, userId: other.id, message: 'oi', conversationId, client: c });
+  assert.equal(c.calls[0].messages.length, 1, 'só a mensagem nova: o histórico do outro usuário não vem junto');
+  const c2 = fakeClient([text('ok')]);
+  await askSara({ clinicId: A, userId: a.id, message: 'de novo', conversationId, client: c2 });
+  assert.ok(c2.calls[0].messages.length > 1, 'o dono da conversa continua vendo o próprio histórico');
+});
