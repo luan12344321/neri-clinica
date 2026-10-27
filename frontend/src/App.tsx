@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useLoad } from './hooks';
 import { Area, AreaChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from 'recharts';
-import { api, brl, getToken, monthLabel, setToken, thisMonth } from './api';
+import { api, brl, getToken, lastMonths, monthLabel, setToken, thisMonth } from './api';
 import { Icon, type IconName } from './Icon';
 import { Cadastros, NewAppointment, type Section } from './Cadastros';
 
-type View = 'inicio' | 'financeiro' | 'estoque' | 'sara' | 'pacientes' | 'procedimentos' | 'produtos' | 'mensagens';
+type View = 'inicio' | 'agenda' | 'financeiro' | 'estoque' | 'sara' | 'pacientes' | 'procedimentos' | 'produtos' | 'mensagens';
 type Me = { name: string; role: string; clinic: string };
 
 const NAV: { group: string; items: { id: View; label: string; icon: IconName }[] }[] = [
   { group: 'Principal', items: [
     { id: 'inicio', label: 'Início', icon: 'home' },
+    { id: 'agenda', label: 'Agenda', icon: 'calendar' },
     { id: 'sara', label: 'Sara, assistente', icon: 'spark' },
   ] },
   { group: 'Gestão', items: [
@@ -57,7 +58,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   return (
     <div className={`shell${view === 'sara' ? ' on-sara' : ''}`}>
       <header className="top">
-        <button ref={menuBtn} className="icon-btn" aria-label="Abrir menu" aria-expanded={open} onClick={() => setOpen(true)}><Icon name="menu" /></button>
+        <button ref={menuBtn} className="icon-btn menu-btn" aria-label="Abrir menu" aria-expanded={open} onClick={() => setOpen(true)}><Icon name="menu" /></button>
         <h1>{TITLE_OVERRIDE[view] ?? TITLES[view]}</h1>
         <div className="top-actions">
           <button className="icon-btn" aria-label={nAlerts ? `${nAlerts} alertas de estoque` : 'Sem alertas'} onClick={() => go('estoque')}>
@@ -68,7 +69,8 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       </header>
 
       <main>
-        {view === 'inicio' && <Today name={me.data?.name} alerts={alerts.data ?? []} />}
+        {view === 'inicio' && <Today name={me.data?.name} alerts={alerts.data ?? []} go={go} />}
+        {view === 'agenda' && <Agenda />}
         {view === 'financeiro' && <Finance />}
         {view === 'estoque' && <Stock />}
         {view === 'sara' && <Sara name={me.data?.name} />}
@@ -80,13 +82,13 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         <button className="fab" aria-label="Falar com a Sara" onClick={() => go('sara')}><Icon name="spark" size={26} /></button>
       )}
 
-      {open && (
-        <div className="drawer-wrap">
+      {/* Celular: gaveta que abre sobre o conteúdo. Desktop (CSS): barra lateral fixa, sempre visível. */}
+      <div className={`drawer-wrap${open ? ' open' : ''}`}>
           <div className="scrim" onClick={() => setOpen(false)} />
-          <nav className="drawer" role="dialog" aria-modal="true" aria-label="Menu principal">
+          <nav className="drawer" role={open ? 'dialog' : undefined} aria-modal={open || undefined} aria-label="Menu principal">
             <div className="drawer-head">
               <div><strong>Clínica</strong><span>{me.data?.clinic ?? 'Gestão'}</span></div>
-              <button className="icon-btn on-dark" aria-label="Fechar menu" onClick={() => { setOpen(false); menuBtn.current?.focus(); }}><Icon name="close" /></button>
+              <button className="icon-btn on-dark close-btn" aria-label="Fechar menu" onClick={() => { setOpen(false); menuBtn.current?.focus(); }}><Icon name="close" /></button>
             </div>
             {NAV.map((g) => (
               <div key={g.group} className="nav-group">
@@ -104,8 +106,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               <button className="out" onClick={onLogout}><Icon name="out" size={18} />Sair</button>
             </div>
           </nav>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -141,7 +142,7 @@ const Delta = ({ value }: { value: number | null }) =>
   value === null ? null : <span className={`delta${value < 0 ? ' down' : ''}`}>{value < 0 ? '▼' : '▲'} {pct(Math.abs(value))}% <i>vs mês anterior</i></span>;
 
 // ---------- Início ----------
-function Today({ name, alerts }: { name?: string; alerts: any[] }) {
+function Today({ name, alerts, go }: { name?: string; alerts: any[]; go: (v: View) => void }) {
   const dash = useLoad<any>('/dashboard');
   const sum = useLoad<any>(`/finance/summary?month=${thisMonth()}`);
   const recv = useLoad<any[]>('/finance/receivables');
@@ -154,49 +155,52 @@ function Today({ name, alerts }: { name?: string; alerts: any[] }) {
   }
   const d = dash.data, s = sum.data;
   const toReceive = (recv.data ?? []).reduce((a, t) => a + Number(t.amount), 0);
-  const series = (d?.revenueByMonth ?? []).map((r: any) => ({ ...r, m: monthLabel(r.month) }));
-  const cur = series.find((r: any) => r.month === thisMonth());
-  const prev = cur ? series[series.indexOf(cur) - 1] : undefined;
-  const delta = cur && prev?.revenue ? ((cur.revenue - prev.revenue) / prev.revenue) * 100 : null;
+  // Sempre 6 meses (zero onde não há receita): o gráfico mantém forma e a variação tem com o que comparar.
+  const byMonth = Object.fromEntries((d?.revenueByMonth ?? []).map((r: any) => [r.month, r.revenue]));
+  const series = lastMonths(6).map((month) => ({ month, m: monthLabel(month), revenue: byMonth[month] ?? 0 }));
+  const cur = series[series.length - 1]!, prev = series[series.length - 2]!;
+  const delta = prev.revenue ? ((cur.revenue - prev.revenue) / prev.revenue) * 100 : null;
   const procTotal = (d?.topProcedures ?? []).reduce((a: number, p: any) => a + p.total, 0);
   const first = name?.split(/\s+/)[0];
   const doneToday = d ? d.today.filter((a: any) => a.status === 'done').length : 0;
 
   return (
-    <>
-      <section className="hello">
+    <div className="dash">
+      <section className="hello span-all">
         <h2>{greeting()}{first ? `, ${first}` : ''}</h2>
         <p className="muted">{new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
       </section>
-      <Status error={dash.error || sum.error} loading={!d || !s} />
+      <div className="span-all"><Status error={dash.error || sum.error} loading={!d || !s} /></div>
       {d && s && (
         <>
-          <section className="hero-card">
-            <span>Faturamento do mês</span>
-            <strong>{brl(s.income)}</strong>
-            {delta === null ? <span className="delta flat">Sem mês anterior para comparar</span> : <Delta value={delta} />}
+          <section className="hero-card span-all">
+            <div className="hero-main">
+              <span>Faturamento do mês</span>
+              <strong>{brl(s.income)}</strong>
+              {delta === null ? <span className="delta flat">Primeiro mês</span> : <Delta value={delta} />}
+            </div>
             <div className="spark" aria-hidden="true">
-              <ResponsiveContainer width="100%" height={64}>
+              <ResponsiveContainer width="100%" height={56}>
                 <AreaChart data={series} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
                   <defs><linearGradient id="g-hero" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" style={{ stopColor: 'var(--yellow)', stopOpacity: 0.35 }} /><stop offset="100%" style={{ stopColor: 'var(--yellow)', stopOpacity: 0 }} />
                   </linearGradient></defs>
-                  <Area type="monotone" dataKey="revenue" stroke="var(--yellow)" strokeWidth={2} fill="url(#g-hero)" isAnimationActive={false} dot={series.length < 2 ? { r: 4, fill: 'var(--yellow)' } : false} />
+                  <Area type="monotone" dataKey="revenue" stroke="var(--yellow)" strokeWidth={2} fill="url(#g-hero)" isAnimationActive={false} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
           </section>
 
-          <section className="kpis">
-            <div className="kpi"><Icon name="calendar" size={18} /><span>Atendimentos hoje</span><strong>{d.today.length}</strong><small>{doneToday} concluído(s)</small></div>
-            <div className="kpi"><Icon name="syringe" size={18} /><span>Procedimentos no mês</span><strong>{s.proceduresDone}</strong></div>
-            <div className="kpi"><Icon name="wallet" size={18} /><span>Ticket médio</span><strong>{brl(s.averageTicket)}</strong></div>
-            <div className="kpi"><Icon name="receive" size={18} /><span>A receber</span><strong>{brl(toReceive)}</strong></div>
+          <section className="kpis span-all">
+            <button className="kpi" onClick={() => go('agenda')}><Icon name="calendar" size={18} /><span>Atendimentos hoje</span><strong>{d.today.length}</strong><small>{doneToday} concluído(s)</small></button>
+            <button className="kpi" onClick={() => go('financeiro')}><Icon name="syringe" size={18} /><span>Procedimentos no mês</span><strong>{s.proceduresDone}</strong></button>
+            <button className="kpi" onClick={() => go('financeiro')}><Icon name="wallet" size={18} /><span>Ticket médio</span><strong>{brl(s.averageTicket)}</strong></button>
+            <button className="kpi" onClick={() => go('financeiro')}><Icon name="receive" size={18} /><span>A receber</span><strong>{brl(toReceive)}</strong><small>{recv.data?.length ?? 0} pendente(s) de pagamento</small></button>
           </section>
 
           {alerts.length > 0 && (
             <section className="card warn">
-              <h2>Atenção</h2>
+              <div className="between"><h2>Atenção</h2><button className="link" onClick={() => go('estoque')}>Ver estoque e reposição</button></div>
               <ul className="rows">
                 {alerts.map((a) => (
                   <li key={a.id}><span>Repor <b>{a.payload.product}</b></span><span className="muted">tem {a.payload.quantity} · comprar {a.payload.buy}</span></li>
@@ -221,11 +225,12 @@ function Today({ name, alerts }: { name?: string; alerts: any[] }) {
                 ))}
               </ul>
             )}
+            <button className="link" style={{ marginTop: 12 }} onClick={() => go('agenda')}>Ver agenda completa</button>
           </section>
 
           <section className="card">
             <div className="between"><h2>Faturamento mensal</h2><Delta value={delta} /></div>
-            <div className="chart" role="img" aria-label="Gráfico de área do faturamento dos últimos meses">
+            <div className="chart" role="img" aria-label="Gráfico de área do faturamento dos últimos 6 meses">
               <ResponsiveContainer width="100%" height={200}>
                 <AreaChart data={series} margin={{ top: 8, right: 8, left: -14, bottom: 0 }}>
                   <defs><linearGradient id="g-rev" x1="0" y1="0" x2="0" y2="1">
@@ -236,7 +241,7 @@ function Today({ name, alerts }: { name?: string; alerts: any[] }) {
                   <YAxis tickLine={false} axisLine={false} width={44} tick={{ fill: 'var(--muted)', fontSize: 12 }} tickFormatter={(v) => (v >= 1000 ? `${v / 1000}k` : v)} />
                   <Tooltip formatter={(v: number) => [brl(v), 'Receita']}
                     contentStyle={{ background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--ink)' }} />
-                  <Area type="monotone" dataKey="revenue" stroke="var(--accent)" strokeWidth={2.5} fill="url(#g-rev)" dot={series.length < 2 ? { r: 5, fill: 'var(--accent)' } : false} />
+                  <Area type="monotone" dataKey="revenue" stroke="var(--accent)" strokeWidth={2.5} fill="url(#g-rev)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -249,7 +254,7 @@ function Today({ name, alerts }: { name?: string; alerts: any[] }) {
                 <div className="donut" role="img" aria-label="Proporção dos procedimentos realizados">
                   <ResponsiveContainer width="100%" height={168}>
                     <PieChart>
-                      <Pie data={d.topProcedures} dataKey="total" nameKey="name" innerRadius="68%" outerRadius="100%" paddingAngle={2} stroke="none" isAnimationActive={false}>
+                      <Pie data={d.topProcedures} dataKey="total" nameKey="name" innerRadius="68%" outerRadius="100%" paddingAngle={d.topProcedures.length > 1 ? 2 : 0} stroke="none" isAnimationActive={false}>
                         {d.topProcedures.map((p: any, i: number) => <Cell key={p.name} fill={`var(--c${(i % 6) + 1})`} />)}
                       </Pie>
                     </PieChart>
@@ -267,6 +272,42 @@ function Today({ name, alerts }: { name?: string; alerts: any[] }) {
           <GoogleCard />
         </>
       )}
+    </div>
+  );
+}
+
+// ---------- Agenda ----------
+function Agenda() {
+  const from = new Date().toISOString().slice(0, 10);
+  const to = new Date(Date.now() + 6 * 864e5).toISOString().slice(0, 10);
+  const ap = useLoad<any[]>(`/appointments?from=${from}&to=${to}`);
+  const days = new Map<string, any[]>();
+  for (const a of ap.data ?? []) {
+    const k = new Date(a.starts_at).toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+    days.set(k, [...(days.get(k) ?? []), a]);
+  }
+  const STATUS: Record<string, string> = { scheduled: 'Agendado', confirmed: 'Confirmado', done: 'Concluído', canceled: 'Cancelado', no_show: 'Faltou' };
+  return (
+    <>
+      <div className="between"><p className="muted">Próximos 7 dias</p><NewAppointment onCreated={ap.reload} /></div>
+      <Status error={ap.error} loading={!ap.data} />
+      {ap.data && days.size === 0 && <section className="card"><p className="muted">Nenhum atendimento nos próximos 7 dias.</p></section>}
+      {[...days].map(([day, items]) => (
+        <section key={day} className="card">
+          <h2 className="cap">{day}</h2>
+          <ul className="rows">
+            {items.map((a) => (
+              <li key={a.id}>
+                <div>
+                  <b>{new Date(a.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</b>{' '}{a.patient}
+                  <div className="muted">{a.procedure ?? 'Sem procedimento'}</div>
+                </div>
+                <span className={`pill ${a.status === 'done' ? 'ok' : a.status === 'canceled' || a.status === 'no_show' ? 'warn' : ''}`}>{STATUS[a.status] ?? a.status}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
     </>
   );
 }
@@ -287,7 +328,7 @@ function GoogleCard() {
         <>
           <p className="muted">Conectado. Agendamentos e alterações são sincronizados a cada 5 minutos.</p>
           <div className="actions">
-            <button className="ghost" disabled={busy} onClick={() => run(async () => { await api('/google/sync', { method: 'POST', json: {} }); setMsg('Sincronizado.'); })}>Sincronizar agora</button>
+            <button className="ghost" disabled={busy} onClick={() => run(async () => { await api('/google/sync', { method: 'POST', json: {} }); setMsg(`Sincronizado às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.`); })}>Sincronizar agora</button>
             <button className="ghost" disabled={busy} onClick={() => run(async () => { await api('/google', { method: 'DELETE' }); st.reload(); })}>Desconectar</button>
           </div>
         </>
@@ -343,14 +384,14 @@ function Finance() {
   );
 
   return (
-    <>
-      <div className="toolbar">
+    <div className="dash">
+      <div className="toolbar span-all">
         <label>Mês<input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} /></label>
       </div>
-      <Status error={sum.error || dre.error} loading={!s || !r} />
+      <div className="span-all"><Status error={sum.error || dre.error} loading={!s || !r} /></div>
       {s && r && (
         <>
-          <section className="fin-cards">
+          <section className="fin-cards span-all">
             <div className="fin"><span><Icon name="receive" size={16} />Receitas</span><strong>{brl(s.income)}</strong></div>
             <div className="fin"><span><Icon name="pay" size={16} />Despesas</span><strong>{brl(s.expense)}</strong></div>
             <div className="fin result"><span><Icon name="wallet" size={16} />Resultado do mês</span><strong className={s.balance < 0 ? 'neg' : ''}>{brl(s.balance)}</strong><small>Ticket médio {brl(s.averageTicket)}</small></div>
@@ -382,7 +423,7 @@ function Finance() {
       )}
       {list('A receber', recv.data, 'Receber')}
       {list('A pagar', pay.data, 'Pagar')}
-    </>
+    </div>
   );
 }
 

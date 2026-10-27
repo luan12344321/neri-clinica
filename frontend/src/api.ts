@@ -22,3 +22,9 @@ export const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency',
 export const monthLabel = (ym: string) =>
   new Date(`${ym}-15`).toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
 export const thisMonth = () => new Date().toISOString().slice(0, 7);
+
+// Os últimos `n` meses (YYYY-MM) até `end`, do mais antigo ao mais recente.
+export const lastMonths = (n: number, end = thisMonth()) => {
+  const [y, m] = end.split('-').map(Number);
+  return Array.from({ length: n }, (_, i) => new Date(Date.UTC(y!, m! - 1 - (n - 1 - i), 1)).toISOString().slice(0, 7));
+};
