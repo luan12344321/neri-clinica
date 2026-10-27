@@ -6,3 +6,4 @@ dist/
 .netlify/
 .playwright-mcp/
 *.log
+netlify/dist-functions/

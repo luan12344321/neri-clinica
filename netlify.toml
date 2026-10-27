@@ -2,22 +2,17 @@
 # Passo a passo e variáveis de ambiente: DEPLOY.md
 
 [build]
-  # backend/node_modules é copiado para a raiz: o empacotador das funções só procura dependências (ex.: pg) acima de netlify/functions
-  command = "npm --prefix backend ci --omit=dev && rm -rf node_modules && cp -r backend/node_modules node_modules && npm --prefix frontend ci && npm --prefix frontend run build"
+  # As funções (netlify/functions) viram um arquivo único com todas as dependências em netlify/dist-functions:
+  # o Netlify não embute node_modules em funções .mjs e o fastify quebra ao carregá-los soltos.
+  # pg-native é o driver nativo opcional do `pg`; não é usado (carregado só sob demanda).
+  command = "npm --prefix backend ci --omit=dev && npx --yes esbuild@0.25.10 netlify/functions/api.mjs netlify/functions/jobs.mjs --bundle --platform=node --format=esm --target=node22 --external:pg-native --out-extension:.js=.mjs --banner:js=\"import{createRequire as __cr}from'module';const require=__cr(import.meta.url);\" --outdir=netlify/dist-functions --log-level=warning && npm --prefix frontend ci && npm --prefix frontend run build"
   publish = "frontend/dist"
-  functions = "netlify/functions"
+  functions = "netlify/dist-functions"
 
 [build.environment]
   NODE_VERSION = "22"
-  # runtime das funções com require() de módulos ES (fastify/light-my-request -> cookie)
-  AWS_LAMBDA_JS_RUNTIME = "nodejs22.x"
 
-[functions]
-  node_bundler = "esbuild"
-  # driver nativo opcional do `pg`; não é usado (carregado só sob demanda)
-  external_node_modules = ["pg-native"]
-
-# /api/* é atendido pela função netlify/functions/api.mjs (avaliada antes dos redirects).
+# /api/* é atendido pela função netlify/functions/api.mjs, empacotada em netlify/dist-functions (avaliada antes dos redirects).
 # Qualquer outra rota cai no app de página única.
 [[redirects]]
   from = "/*"
