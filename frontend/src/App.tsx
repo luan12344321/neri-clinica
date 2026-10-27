@@ -18,7 +18,7 @@ const NAV: { group: string; items: { id: View; label: string; icon: IconName; mg
   { group: 'Principal', items: [
     { id: 'inicio', label: 'Início', icon: 'home' },
     { id: 'agenda', label: 'Agenda', icon: 'calendar' },
-    { id: 'sara', label: 'Julia, assistente', icon: 'spark', mgr: true },
+    { id: 'sara', label: 'Julia, assistente', icon: 'spark' },
   ] },
   { group: 'Gestão', items: [
     { id: 'financeiro', label: 'Financeiro', icon: 'chart', mgr: true },
@@ -583,7 +583,7 @@ function Julia({ name }: { name?: string }) {
       const s = e instanceof ApiError ? e.status : 0;
       const text = s === 503 ? 'A Julia está indisponível no momento. Avise o administrador da clínica.'
         : s === 504 ? 'A Julia demorou demais para responder. Tente uma pergunta mais curta.'
-        : s === 429 ? 'Muitas perguntas em sequência. Aguarde um minuto e tente de novo.'
+        : s === 429 ? 'Limite de uso da Julia atingido (por minuto ou do mês). Aguarde um pouco ou avise o administrador.'
         : s === 403 ? 'Seu perfil não tem acesso à Julia.' : 'Não consegui responder agora.';
       setMsgs((m) => [...m, { role: 'sara', text, retry: s === 403 ? undefined : message }]);
     }

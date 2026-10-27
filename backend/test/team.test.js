@@ -1,10 +1,10 @@
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import Anthropic from '@anthropic-ai/sdk';
 import { setup } from './helpers.js';
 
 let t, owner, aiFailure;
-before(async () => { t = await setup(); ({ aiFailure } = await import('../src/sara.js')); });
+let GeminiError, BudgetError;
+before(async () => { t = await setup(); ({ aiFailure } = await import('../src/sara.js')); ({ GeminiError, BudgetError } = await import('../src/gemini.js')); });
 after(() => t.close());
 beforeEach(async () => { await t.reset(); await t.addExtras(); owner = await t.tokenFor('gestor@demo.test'); });
 
@@ -28,7 +28,7 @@ test('funcionário não vê dinheiro nem a equipe: financeiro, Julia e /team dã
   await hire();
   const { json: { token } } = await login('ana@demo.test');
   for (const [m, u] of [['GET', '/finance/summary?month=2026-01'], ['GET', '/finance/cashflow'], ['GET', '/finance/receivables'],
-    ['POST', '/sara/chat'], ['POST', '/sara/test'], ['GET', '/team'], ['POST', '/team']]) {
+    ['POST', '/sara/test'], ['GET', '/team'], ['POST', '/team']]) {
     assert.equal((await t.call(m, u, { token, body: { message: 'oi' } })).status, 403, `${m} ${u}`);
   }
   const dash = (await t.call('GET', '/dashboard', { token })).json;
@@ -86,18 +86,19 @@ test('trocar a própria senha exige a atual e mínimo de 10 caracteres', async (
 });
 
 test('falhas da IA viram códigos específicos; erros comuns não são mascarados', () => {
-  const api = (status, msg) => Anthropic.APIError.generate(status, { error: { message: msg } }, msg, new Headers());
-  assert.deepEqual(aiFailure(api(400, 'Your credit balance is too low')), { code: 503, error: 'ai_unavailable' });
-  assert.deepEqual(aiFailure(api(401, 'invalid x-api-key')), { code: 503, error: 'ai_unavailable' });
-  assert.deepEqual(aiFailure(api(429, 'rate limited')), { code: 429, error: 'ai_busy' });
-  assert.deepEqual(aiFailure(new Anthropic.APIConnectionTimeoutError({})), { code: 504, error: 'ai_timeout' });
+  assert.deepEqual(aiFailure(new GeminiError(400, 'billing')), { code: 503, error: 'ai_unavailable' });
+  assert.deepEqual(aiFailure(new GeminiError(403, 'API key invalid')), { code: 503, error: 'ai_unavailable' });
+  assert.deepEqual(aiFailure(new GeminiError(0, 'sem chave')), { code: 503, error: 'ai_unavailable' });
+  assert.deepEqual(aiFailure(new GeminiError(429, 'rate limited')), { code: 429, error: 'ai_busy' });
+  assert.deepEqual(aiFailure(new BudgetError('clínica')), { code: 429, error: 'ai_budget' });
+  assert.deepEqual(aiFailure(Object.assign(new Error('t'), { name: 'TimeoutError' })), { code: 504, error: 'ai_timeout' });
   assert.equal(aiFailure(new Error('falha de banco')), null);
 });
 
 test('rota /sara/chat: sem crédito responde 503 ai_unavailable (não 500) e não vaza a causa', async () => {
   const real = globalThis.fetch;
   globalThis.fetch = async () => new Response(
-    JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'Your credit balance is too low' } }),
+    JSON.stringify({ error: { code: 400, message: 'billing not enabled', status: 'FAILED_PRECONDITION' } }),
     { status: 400, headers: { 'content-type': 'application/json' } });
   try {
     const r = await t.call('POST', '/sara/chat', { token: owner, body: { message: 'oi' } });

@@ -166,10 +166,10 @@ function AssistantCard() {
   return (
     <section className="card">
       <h2>Assistente Julia</h2>
-      <p className="muted">Confira se a Julia está conectada à inteligência artificial. Use depois de adicionar créditos na conta da Anthropic.</p>
+      <p className="muted">Confira se a Julia está conectada à inteligência artificial. Ela usa a API do Google Gemini (plano pago, com limite mensal de uso).</p>
       <div className="actions"><button className="ghost" disabled={state === 'busy'} onClick={test}>{state === 'busy' ? 'Testando…' : 'Testar conexão'}</button></div>
       {state === 'ok' && <p className="ok-text" role="status"><Icon name="check" size={16} /> Tudo certo: a Julia está respondendo.</p>}
-      {state === 'down' && <p role="alert" className="err">Sem conexão com a IA. Verifique se a conta da Anthropic tem crédito e se a chave (ANTHROPIC_API_KEY) está correta no Netlify.</p>}
+      {state === 'down' && <p role="alert" className="err">Sem conexão com a IA. Verifique se a cobrança do Google Gemini está ativa e se a chave (GEMINI_API_KEY) está correta na Vercel.</p>}
       {state === 'error' && <p role="alert" className="err">Não foi possível testar agora. Tente novamente em instantes.</p>}
     </section>
   );
