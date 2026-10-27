@@ -6,7 +6,7 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { q } from './db.js';
 import { audit } from './audit.js';
-import { askSara } from './sara.js';
+import { askSara, aiFailure, pingSara } from './sara.js';
 import googleRoutes, { pushAppointment } from './google.js';
 import { getDashboard, getFinanceSummary, getTopProcedures, getRestock, getCashFlow, buildDre } from './queries.js';
 
@@ -27,11 +27,23 @@ app.setErrorHandler((err, req, reply) => {
 
 app.decorate('auth', async (req, reply) => {
   try { await req.jwtVerify(); } catch { return reply.code(401).send({ error: 'unauthorized' }); }
-  if (!req.user.clinicId) reply.code(401).send({ error: 'unauthorized' }); // ex.: token de `state` do OAuth não autentica
+  if (!req.user.clinicId) return reply.code(401).send({ error: 'unauthorized' }); // ex.: token de `state` do OAuth não autentica
+  const [u] = await q(`SELECT role FROM users WHERE id=$1 AND clinic_id=$2 AND password_hash <> '!'`, [req.user.userId, req.user.clinicId]);
+  if (!u) return reply.code(401).send({ error: 'unauthorized' });
+  req.user.role = u.role;
 });
 const guard = { onRequest: [app.auth] };
+// Dinheiro (financeiro, DRE, Julia) só para dono e gerente: recepção e profissional não veem.
+const MANAGERS = ['owner', 'manager'];
+const manager = { onRequest: [app.auth, async (req, reply) => {
+  if (!MANAGERS.includes(req.user.role)) return reply.code(403).send({ error: 'forbidden' });
+}] };
+const owner = { onRequest: [app.auth, async (req, reply) => {
+  if (req.user.role !== 'owner') return reply.code(403).send({ error: 'forbidden' });
+}] };
 await app.register((await import('./cadastros.js')).default);
 await app.register(googleRoutes);
+await app.register((await import('./team.js')).default);
 await app.register((await import('./prontuario.js')).default);
 const clinic = (req) => req.user.clinicId;
 
@@ -57,13 +69,25 @@ app.post('/auth/login', { config: { rateLimit: { max: 10, timeWindow: '1 minute'
 });
 
 app.get('/me', guard, async (req, reply) => {
-  const [u] = await q(`SELECT u.name, u.role, c.name AS clinic FROM users u JOIN clinics c ON c.id=u.clinic_id
+  const [u] = await q(`SELECT u.name, u.email, u.role, c.name AS clinic FROM users u JOIN clinics c ON c.id=u.clinic_id
                        WHERE u.id=$1 AND u.clinic_id=$2`, [req.user.userId, clinic(req)]);
   return u ?? reply.code(401).send({ error: 'unauthorized' });
 });
 
+app.post('/me/password', { ...guard, config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (req, reply) => {
+  const { current, next } = z.object({ current: z.string(), next: z.string().min(10).max(200) }).parse(req.body);
+  const [u] = await q('SELECT password_hash FROM users WHERE id=$1', [req.user.userId]);
+  if (!(await bcrypt.compare(current, u.password_hash))) return reply.code(403).send({ error: 'wrong password' });
+  await q('UPDATE users SET password_hash=$1 WHERE id=$2', [await bcrypt.hash(next, 10), req.user.userId]);
+  await audit({ clinicId: clinic(req), userId: req.user.userId, ip: req.ip }, 'auth.password_changed', 'user', req.user.userId);
+  return { ok: true };
+});
+
 // ---------- Dashboard / agenda ----------
-app.get('/dashboard', guard, (req) => getDashboard(clinic(req)));
+app.get('/dashboard', guard, async (req) => {
+  const d = await getDashboard(clinic(req));
+  return MANAGERS.includes(req.user.role) ? d : { ...d, revenueByMonth: [] };
+});
 
 app.get('/appointments', guard, async (req) => {
   const { from, to } = z.object({ from: z.string().date(), to: z.string().date() }).parse(req.query);
@@ -151,21 +175,21 @@ app.get('/patients', guard, (req) => {
 // POST /patients, ficha com CPF e prontuário: ver prontuario.js (dados sensíveis, cifrados e auditados)
 
 // ---------- Financeiro ----------
-app.get('/finance/summary', guard, (req) => {
+app.get('/finance/summary', manager, (req) => {
   const { month } = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/) }).parse(req.query);
   return getFinanceSummary(clinic(req), `${month}-01`);
 });
-app.get('/finance/top-procedures', guard, (req) => getTopProcedures(clinic(req), 6));
-app.get('/finance/cashflow', guard, (req) => getCashFlow(clinic(req), 6));
-app.get('/finance/dre', guard, (req) => {
+app.get('/finance/top-procedures', manager, (req) => getTopProcedures(clinic(req), 6));
+app.get('/finance/cashflow', manager, (req) => getCashFlow(clinic(req), 6));
+app.get('/finance/dre', manager, (req) => {
   const { month } = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/) }).parse(req.query);
   return buildDre(clinic(req), `${month}-01`);
 });
-app.get('/finance/payables', guard, (req) =>
+app.get('/finance/payables', manager, (req) =>
   q(`SELECT * FROM transactions WHERE clinic_id=$1 AND type='expense' AND status='pending' ORDER BY due_date`, [clinic(req)]));
-app.get('/finance/receivables', guard, (req) =>
+app.get('/finance/receivables', manager, (req) =>
   q(`SELECT * FROM transactions WHERE clinic_id=$1 AND type='income' AND status='pending' ORDER BY due_date`, [clinic(req)]));
-app.post('/finance/transactions/:id/pay', guard, async (req, reply) => {
+app.post('/finance/transactions/:id/pay', manager, async (req, reply) => {
   const { id } = req.params;
   const [row] = await q(`UPDATE transactions SET status='paid', paid_at=now()
     WHERE id=$1 AND clinic_id=$2 AND status='pending' RETURNING *`, [id, clinic(req)]);
@@ -181,11 +205,23 @@ app.get('/protocols', guard, (req) =>
      LEFT JOIN products pr ON pr.id=pi.product_id
      WHERE p.clinic_id=$1 GROUP BY p.id`, [clinic(req)]));
 
-// ---------- Sara ----------
-app.post('/sara/chat', { ...guard, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => {
+// ---------- Julia ----------
+// Falha do provedor de IA (sem crédito, chave inválida, fora do ar, limite, tempo) vira erro específico, sem vazar detalhes.
+const aiError = (req, reply, e) => {
+  const f = aiFailure(e);
+  if (!f) throw e;
+  req.log.error(e);
+  return reply.code(f.code).send({ error: f.error });
+};
+app.post('/sara/chat', { ...manager, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
   const { message, conversationId } = z.object({
     message: z.string().min(1).max(2000), conversationId: z.guid().optional() }).parse(req.body);
-  return askSara({ clinicId: clinic(req), userId: req.user.userId, message, conversationId });
+  try { return await askSara({ clinicId: clinic(req), userId: req.user.userId, message, conversationId }); }
+  catch (e) { return aiError(req, reply, e); }
+});
+// Teste de conexão com a IA (configurações): uma chamada mínima, só para o dono.
+app.post('/sara/test', { ...owner, config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (req, reply) => {
+  try { await pingSara(); return { ok: true }; } catch (e) { return aiError(req, reply, e); }
 });
 
 app.get('/health', async () => ({ ok: true }));

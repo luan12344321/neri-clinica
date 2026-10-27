@@ -1,33 +1,34 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useLoad } from './hooks';
 import { Area, AreaChart, Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from 'recharts';
-import { api, brl, getToken, lastMonths, monthLabel, setToken, thisMonth } from './api';
+import { ApiError, api, brl, getToken, lastMonths, monthLabel, setToken, thisMonth } from './api';
 import { Icon, type IconName } from './Icon';
 import { Cadastros, NewAppointment, type Section } from './Cadastros';
-import { Empty, ListSkeleton, ToastProvider } from './ui';
+import { Empty, ListSkeleton, RoleProvider, ToastProvider, useInstall, useRole } from './ui';
+import { Settings, type Me } from './Settings';
 
-type View = 'inicio' | 'agenda' | 'financeiro' | 'estoque' | 'sara' | 'pacientes' | 'procedimentos' | 'produtos' | 'mensagens';
-type Me = { name: string; role: string; clinic: string };
+type View = 'inicio' | 'agenda' | 'financeiro' | 'estoque' | 'sara' | 'pacientes' | 'procedimentos' | 'produtos' | 'mensagens' | 'config';
 
-const NAV: { group: string; items: { id: View; label: string; icon: IconName }[] }[] = [
+const NAV: { group: string; items: { id: View; label: string; icon: IconName; mgr?: boolean }[] }[] = [
   { group: 'Principal', items: [
     { id: 'inicio', label: 'Início', icon: 'home' },
     { id: 'agenda', label: 'Agenda', icon: 'calendar' },
-    { id: 'sara', label: 'Sara, assistente', icon: 'spark' },
+    { id: 'sara', label: 'Julia, assistente', icon: 'spark', mgr: true },
   ] },
   { group: 'Gestão', items: [
-    { id: 'financeiro', label: 'Financeiro', icon: 'chart' },
+    { id: 'financeiro', label: 'Financeiro', icon: 'chart', mgr: true },
     { id: 'estoque', label: 'Estoque e reposição', icon: 'box' },
-    { id: 'produtos', label: 'Produtos', icon: 'tag' },
+    { id: 'produtos', label: 'Produtos', icon: 'tag', mgr: true },
   ] },
   { group: 'Cadastros', items: [
     { id: 'pacientes', label: 'Pacientes', icon: 'users' },
     { id: 'procedimentos', label: 'Procedimentos', icon: 'syringe' },
   ] },
-  { group: 'Comunicação', items: [{ id: 'mensagens', label: 'Mensagens', icon: 'mail' }] },
+  { group: 'Comunicação', items: [{ id: 'mensagens', label: 'Mensagens', icon: 'mail', mgr: true }] },
+  { group: 'Conta', items: [{ id: 'config', label: 'Configurações', icon: 'gear' }] },
 ];
 const TITLES = Object.fromEntries(NAV.flatMap((g) => g.items.map((i) => [i.id, i.label]))) as Record<View, string>;
-const TITLE_OVERRIDE: Partial<Record<View, string>> = { inicio: 'Início', sara: 'Sara' };
+const TITLE_OVERRIDE: Partial<Record<View, string>> = { inicio: 'Início', sara: 'Julia' };
 
 const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'; };
 const initials = (name = '') => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('') || '·';
@@ -40,9 +41,14 @@ export default function App() {
 }
 
 function Shell({ onLogout }: { onLogout: () => void }) {
+  const me = useLoad<Me>('/me');
+  return <RoleProvider role={me.data?.role ?? null}><ShellInner onLogout={onLogout} me={me.data} /></RoleProvider>;
+}
+
+function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
+  const { isManager } = useRole();
   const [view, setView] = useState<View>('inicio');
   const [open, setOpen] = useState(false);
-  const me = useLoad<Me>('/me');
   // Estoque atual (não o aviso gravado pela rotina): some assim que o produto é reposto.
   const restock = useLoad<any[]>('/stock/restock');
   const menuBtn = useRef<HTMLButtonElement>(null);
@@ -67,22 +73,23 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           <button className="icon-btn" aria-label={nAlerts ? `${nAlerts} alertas de estoque` : 'Sem alertas'} onClick={() => go('estoque')}>
             <Icon name="bell" />{nAlerts > 0 && <span className="dot">{nAlerts}</span>}
           </button>
-          <span className="avatar" aria-label={me.data?.name ?? 'Usuário'}>{initials(me.data?.name)}</span>
+          <button className="avatar" aria-label="Configurações da conta" onClick={() => go('config')}>{initials(me?.name)}</button>
         </div>
       </header>
 
       <main>
-        {view === 'inicio' && <Today name={me.data?.name} restock={restock.data ?? []} go={go} />}
+        {view === 'inicio' && <Today name={me?.name} restock={restock.data ?? []} go={go} money={isManager} />}
+        {view === 'config' && <Settings me={me} />}
         {view === 'agenda' && <Agenda />}
         {view === 'financeiro' && <Finance />}
         {view === 'estoque' && <Stock go={go} />}
-        {view === 'sara' && <Sara name={me.data?.name} />}
+        {view === 'sara' && <Julia name={me?.name} />}
         {(view === 'pacientes' || view === 'procedimentos' || view === 'mensagens') && <Cadastros section={view} />}
         {view === 'produtos' && <Cadastros section={'estoque' satisfies Section} />}
       </main>
 
-      {view !== 'sara' && (
-        <button className="fab" aria-label="Falar com a Sara" onClick={() => go('sara')}><Icon name="spark" size={26} /></button>
+      {view !== 'sara' && isManager && (
+        <button className="fab" aria-label="Falar com a Julia" onClick={() => go('sara')}><Icon name="spark" size={26} /></button>
       )}
 
       {/* Celular: gaveta que abre sobre o conteúdo. Desktop (CSS): barra lateral fixa, sempre visível. */}
@@ -90,10 +97,10 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           <div className="scrim" onClick={() => setOpen(false)} />
           <nav className="drawer" role={open ? 'dialog' : undefined} aria-modal={open || undefined} aria-label="Menu principal">
             <div className="drawer-head">
-              <div><strong>Clínica</strong><span>{me.data?.clinic ?? 'Gestão'}</span></div>
+              <div><strong>Clínica</strong><span>{me?.clinic ?? 'Gestão'}</span></div>
               <button className="icon-btn on-dark close-btn" aria-label="Fechar menu" onClick={() => { setOpen(false); menuBtn.current?.focus(); }}><Icon name="close" /></button>
             </div>
-            {NAV.map((g) => (
+            {NAV.map((g) => ({ ...g, items: g.items.filter((i) => !i.mgr || isManager) })).filter((g) => g.items.length).map((g) => (
               <div key={g.group} className="nav-group">
                 <p>{g.group}</p>
                 {g.items.map((i) => (
@@ -104,8 +111,8 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               </div>
             ))}
             <div className="drawer-foot">
-              <span className="avatar sm">{initials(me.data?.name)}</span>
-              <div><b>{me.data?.name ?? ''}</b></div>
+              <span className="avatar sm">{initials(me?.name)}</span>
+              <div><b>{me?.name ?? ''}</b></div>
               <button className="out" onClick={onLogout}><Icon name="out" size={18} />Sair</button>
             </div>
           </nav>
@@ -127,7 +134,7 @@ function Login({ onDone }: { onDone: () => void }) {
   }
   return (
     <div className="login-page">
-      <aside className="login-brand" aria-hidden="true"><span className="logo"><svg viewBox="0 0 24 24" width="30" height="30"><path d="M12 5v14M5 12h14" /></svg></span><h2>Gestão da clínica na palma da mão</h2><p>Agenda, financeiro, estoque e a Sara, sua assistente, em um só lugar.</p></aside>
+      <aside className="login-brand" aria-hidden="true"><span className="logo"><svg viewBox="0 0 24 24" width="30" height="30"><path d="M12 5v14M5 12h14" /></svg></span><h2>Gestão da clínica na palma da mão</h2><p>Agenda, financeiro, estoque e a Julia, sua assistente, em um só lugar.</p></aside>
     <form className="login" onSubmit={submit}>
       <span className="logo" aria-hidden="true"><svg viewBox="0 0 24 24" width="30" height="30"><path d="M12 5v14M5 12h14" /></svg></span>
       <h1>Clínica</h1>
@@ -147,11 +154,27 @@ const Status = ({ error, loading }: { error: string; loading: boolean }) =>
 const Delta = ({ value }: { value: number | null }) =>
   value === null ? null : <span className={`delta${value < 0 ? ' down' : ''}`}>{value < 0 ? '▼' : '▲'} {pct(Math.abs(value))}% <i>vs mês anterior</i></span>;
 
+// Convite para instalar o app (só aparece quando o navegador permite instalar, ou no iPhone).
+function InstallBanner({ go }: { go: (v: View) => void }) {
+  const { installed, canPrompt, ios, install } = useInstall();
+  const [hidden, setHidden] = useState(() => { try { return localStorage.getItem('clinica.installHidden') === '1'; } catch { return false; } });
+  if (installed || hidden || !(canPrompt || ios)) return null;
+  const hide = () => { try { localStorage.setItem('clinica.installHidden', '1'); } catch { /* storage bloqueado */ } setHidden(true); };
+  return (
+    <section className="card install-banner span-all">
+      <Icon name="download" size={22} />
+      <div className="grow"><b>Instale o app no celular</b><span className="muted">{canPrompt ? 'Abra direto da tela inicial, como um aplicativo.' : 'Toque em Compartilhar e depois em Adicionar à Tela de Início.'}</span></div>
+      {canPrompt ? <button className="primary sm" onClick={install}>Instalar</button> : <button className="ghost sm" onClick={() => go('config')}>Como</button>}
+      <button className="icon-btn" aria-label="Dispensar" onClick={hide}><Icon name="close" size={18} /></button>
+    </section>
+  );
+}
+
 // ---------- Início ----------
-function Today({ name, restock, go }: { name?: string; restock: any[]; go: (v: View) => void }) {
+function Today({ name, restock, go, money }: { name?: string; restock: any[]; go: (v: View) => void; money: boolean }) {
   const dash = useLoad<any>('/dashboard');
-  const sum = useLoad<any>(`/finance/summary?month=${thisMonth()}`);
-  const recv = useLoad<any[]>('/finance/receivables');
+  const sum = useLoad<any>(money ? `/finance/summary?month=${thisMonth()}` : null);
+  const recv = useLoad<any[]>(money ? '/finance/receivables' : null);
   const [busyId, setBusyId] = useState('');
 
   async function complete(id: string) {
@@ -176,9 +199,11 @@ function Today({ name, restock, go }: { name?: string; restock: any[]; go: (v: V
         <h2>{greeting()}{first ? `, ${first}` : ''}</h2>
         <p className="muted">{new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
       </section>
-      <div className="span-all"><Status error={dash.error || sum.error} loading={!d || !s} /></div>
-      {d && s && (
+      <div className="span-all"><Status error={dash.error || sum.error} loading={!d || (money && !s)} /></div>
+      <InstallBanner go={go} />
+      {d && (!money || s) && (
         <>
+          {money && s && (
           <section className="hero-card span-all">
             <div className="hero-main">
               <span>Faturamento do mês</span>
@@ -195,13 +220,15 @@ function Today({ name, restock, go }: { name?: string; restock: any[]; go: (v: V
                 </AreaChart>
               </ResponsiveContainer>
             </div>
-          </section>
+          </section>)}
 
           <section className="kpis span-all">
             <button className="kpi" onClick={() => go('agenda')}><Icon name="calendar" size={18} /><span>Atendimentos hoje</span><strong>{d.today.length}</strong><small>{doneToday} concluído(s)</small></button>
+            {money && s && (<>
             <button className="kpi" onClick={() => go('financeiro')}><Icon name="syringe" size={18} /><span>Procedimentos no mês</span><strong>{s.proceduresDone}</strong></button>
             <button className="kpi" onClick={() => go('financeiro')}><Icon name="wallet" size={18} /><span>Ticket médio</span><strong>{brl(s.averageTicket)}</strong></button>
             <button className="kpi" onClick={() => go('financeiro')}><Icon name="receive" size={18} /><span>A receber</span><strong>{brl(toReceive)}</strong><small>{recv.data?.length ?? 0} pendente(s) de pagamento</small></button>
+          </>)}
           </section>
 
           {restock.length > 0 && (
@@ -234,6 +261,7 @@ function Today({ name, restock, go }: { name?: string; restock: any[]; go: (v: V
             <button className="link" style={{ marginTop: 12 }} onClick={() => go('agenda')}>Ver agenda completa</button>
           </section>
 
+          {money && (
           <section className="card">
             <div className="between"><h2>Faturamento mensal</h2><Delta value={delta} /></div>
             <div className="chart" role="img" aria-label="Gráfico de área do faturamento dos últimos 6 meses">
@@ -252,6 +280,7 @@ function Today({ name, restock, go }: { name?: string; restock: any[]; go: (v: V
               </ResponsiveContainer>
             </div>
           </section>
+          )}
 
           <section className="card">
             <h2>Procedimentos mais realizados</h2>
@@ -461,12 +490,13 @@ function Finance() {
 
 // ---------- Estoque ----------
 function Stock({ go }: { go: (v: View) => void }) {
+  const { isManager } = useRole();
   const restock = useLoad<any[]>('/stock/restock');
   const protocols = useLoad<any[]>('/protocols');
   return (
     <div className="dash">
       <section className="card">
-        <div className="between"><h2>O que repor</h2><button className="link" onClick={() => go('produtos')}>Registrar entrada</button></div>
+        <div className="between"><h2>O que repor</h2>{isManager && <button className="link" onClick={() => go('produtos')}>Registrar entrada</button>}</div>
         <Status error={restock.error} loading={!restock.data} />
         {restock.data && (restock.data.length === 0 ? <Empty icon="check" title="Estoque em dia" text="Nenhum produto está no mínimo ou abaixo." /> : (
           <ul className="rows">
@@ -501,7 +531,7 @@ function Stock({ go }: { go: (v: View) => void }) {
   );
 }
 
-// ---------- Sara ----------
+// ---------- Julia ----------
 type Msg = { role: 'user' | 'sara'; text: string; retry?: string };
 const SUGGESTIONS: { icon: IconName; title: string; text: string }[] = [
   { icon: 'chart', title: 'Faturamento', text: 'Faturamento e nº de pacientes dos últimos 6 meses' },
@@ -509,7 +539,7 @@ const SUGGESTIONS: { icon: IconName; title: string; text: string }[] = [
   { icon: 'pulse', title: 'Ticket médio', text: 'Como aumentar meu ticket médio?' },
 ];
 
-function Sara({ name }: { name?: string }) {
+function Julia({ name }: { name?: string }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -524,7 +554,14 @@ function Sara({ name }: { name?: string }) {
       const r = await api<{ conversationId: string; reply: string }>('/sara/chat', { method: 'POST', json: { message, conversationId: convo.current } });
       convo.current = r.conversationId;
       setMsgs((m) => [...m, { role: 'sara', text: r.reply }]);
-    } catch { setMsgs((m) => [...m, { role: 'sara', text: 'Não consegui responder agora.', retry: message }]); }
+    } catch (e) {
+      const s = e instanceof ApiError ? e.status : 0;
+      const text = s === 503 ? 'A Julia está indisponível no momento. Avise o administrador da clínica.'
+        : s === 504 ? 'A Julia demorou demais para responder. Tente uma pergunta mais curta.'
+        : s === 429 ? 'Muitas perguntas em sequência. Aguarde um minuto e tente de novo.'
+        : s === 403 ? 'Seu perfil não tem acesso à Julia.' : 'Não consegui responder agora.';
+      setMsgs((m) => [...m, { role: 'sara', text, retry: s === 403 ? undefined : message }]);
+    }
     finally { setBusy(false); }
   }
 
@@ -535,7 +572,7 @@ function Sara({ name }: { name?: string }) {
           <div className="intro">
             <span className="sara-avatar"><Icon name="spark" size={34} /></span>
             <h2>Olá{name ? `, ${name.split(/\s+/)[0]}` : ''}</h2>
-            <p className="muted">Eu sou a Sara. Pergunte sobre faturamento, pacientes, estoque ou finanças da clínica.</p>
+            <p className="muted">Eu sou a Julia. Pergunte sobre faturamento, pacientes, estoque ou finanças da clínica.</p>
             <div className="sugg">
               {SUGGESTIONS.map((s) => (
                 <button key={s.title} className="sugg-card" onClick={() => send(s.text)}>
@@ -550,11 +587,11 @@ function Sara({ name }: { name?: string }) {
             {m.retry && <button className="ghost sm retry" disabled={busy} onClick={() => { setMsgs((x) => x.slice(0, i - 1)); send(m.retry!); }}>Tentar novamente</button>}
           </div>
         ))}
-        {busy && <div className="bubble sara muted">Sara está consultando os dados…</div>}
+        {busy && <div className="bubble sara muted">Julia está consultando os dados…</div>}
         <div ref={end} />
       </div>
       <form className="composer" onSubmit={(e) => { e.preventDefault(); send(text); }}>
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Pergunte à Sara…" maxLength={2000} aria-label="Mensagem para a Sara" />
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Pergunte à Julia…" maxLength={2000} aria-label="Mensagem para a Julia" />
         <button className="send" aria-label="Enviar" disabled={busy || !text.trim()}><Icon name="send" size={20} /></button>
       </form>
     </div>

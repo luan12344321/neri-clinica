@@ -7,14 +7,26 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      includeAssets: ['icon.svg', 'apple-touch-icon.png'],
       manifest: {
+        id: '/',
         name: 'Clínica — Gestão',
         short_name: 'Clínica',
+        description: 'Agenda, financeiro, estoque e a assistente Julia da sua clínica.',
         lang: 'pt-BR',
         display: 'standalone',
+        orientation: 'portrait',
+        start_url: '/',
+        scope: '/',
+        categories: ['business', 'medical', 'productivity'],
         background_color: '#f4f3ee',
         theme_color: '#163b2d',
-        icons: [{ src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }],
+        icons: [
+          { src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          { src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+        ],
       },
       // Dados da API nunca são cacheados pelo service worker (financeiro/saúde).
       workbox: { navigateFallbackDenylist: [/^\/api/] },

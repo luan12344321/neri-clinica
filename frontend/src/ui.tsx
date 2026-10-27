@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Icon, type IconName } from './Icon';
 
 // ---------- Aviso rápido (toast) ----------
@@ -65,4 +65,33 @@ export function Avatar({ name, size = 42 }: { name: string; size?: number }) {
   const ini = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('') || '·';
   const hue = [...name].reduce((a, c) => a + c.charCodeAt(0), 0) % 6 + 1;
   return <span className="av" style={{ width: size, height: size, background: `var(--c${hue})`, fontSize: size * 0.36 }} aria-hidden="true">{ini}</span>;
+}
+
+// ---------- Perfil do usuário logado ----------
+export type Role = 'owner' | 'manager' | 'professional' | 'reception';
+export const ROLE_LABEL: Record<Role, string> = { owner: 'Proprietário(a)', manager: 'Gerente', professional: 'Profissional', reception: 'Recepção' };
+type RoleInfo = { role: Role | null; isManager: boolean; isOwner: boolean };
+const RoleCtx = createContext<RoleInfo>({ role: null, isManager: false, isOwner: false });
+export const useRole = () => useContext(RoleCtx);
+export const RoleProvider = ({ role, children }: { role: Role | null; children: ReactNode }) => (
+  <RoleCtx.Provider value={{ role, isManager: role === 'owner' || role === 'manager', isOwner: role === 'owner' }}>{children}</RoleCtx.Provider>
+);
+
+// ---------- Instalação como aplicativo (PWA) ----------
+// O navegador dispara beforeinstallprompt uma vez, cedo; guardamos o evento fora do React para não perdê-lo.
+let deferred: any = null;
+const subs = new Set<() => void>();
+const notify = () => subs.forEach((f) => f());
+if (typeof window !== 'undefined') {
+  addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferred = e; notify(); });
+  addEventListener('appinstalled', () => { deferred = null; notify(); });
+}
+const standalone = () => typeof window !== 'undefined' && (matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone === true);
+
+export function useInstall() {
+  const canPrompt = useSyncExternalStore((cb) => { subs.add(cb); return () => subs.delete(cb); }, () => !!deferred);
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const installed = standalone();
+  const install = async () => { if (!deferred) return; deferred.prompt(); await deferred.userChoice; deferred = null; notify(); };
+  return { installed, canPrompt, ios, install };
 }

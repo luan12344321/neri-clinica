@@ -6,7 +6,7 @@ import { getRevenueByMonth, getTopProcedures, getFinanceSummary, getRestock, get
 let defaultClient; // criado sob demanda (lê ANTHROPIC_API_KEY)
 const MODEL = process.env.SARA_MODEL ?? 'claude-sonnet-5-5';
 
-const SYSTEM = `Você é Sara, assistente interna de gestão de uma clínica médica/estética.
+const SYSTEM = `Você é Julia, assistente interna de gestão de uma clínica médica/estética.
 Fale em português do Brasil, de forma objetiva. Use SEMPRE as ferramentas para obter números; nunca invente dados.
 Formate valores em R$. Se faltar dado, diga isso. Você só lê dados e não executa ações.`;
 
@@ -42,7 +42,7 @@ export async function askSara({ clinicId, userId, message, conversationId = rand
     [clinicId, userId, conversationId, role, JSON.stringify(content), usage?.input_tokens ?? null, usage?.output_tokens ?? null]);
   await save('user', message);
 
-  // Funções serverless têm tempo máximo por requisição: a Sara para de consultar antes de estourá-lo.
+  // Funções serverless têm tempo máximo por requisição: a Julia para de consultar antes de estourá-lo.
   const deadline = Date.now() + Number(process.env.SARA_BUDGET_MS ?? 40_000);
   for (let step = 0; step < 6 && Date.now() < deadline; step++) {   // limite de iterações e de tempo
     const res = await client.messages.create({
@@ -66,4 +66,18 @@ export async function askSara({ clinicId, userId, message, conversationId = rand
     await save('user', results);
   }
   return { conversationId, reply: 'Não consegui concluir a consulta a tempo. Tente uma pergunta mais específica.' };
+}
+
+// Traduz falhas do provedor de IA em respostas HTTP específicas; devolve null para erros que não são da IA.
+// Sem crédito, chave inválida, modelo indisponível e queda do provedor são o mesmo problema para o usuário: 503.
+export function aiFailure(e) {
+  if (e instanceof Anthropic.APIConnectionTimeoutError) return { code: 504, error: 'ai_timeout' };
+  if (e instanceof Anthropic.RateLimitError) return { code: 429, error: 'ai_busy' };
+  if (e instanceof Anthropic.APIError) return { code: 503, error: 'ai_unavailable' };
+  return null;
+}
+
+// Chamada mínima para conferir chave, crédito e modelo (usada pelo botão "Testar Julia" nas configurações).
+export async function pingSara(client = (defaultClient ??= new Anthropic())) {
+  await client.messages.create({ model: MODEL, max_tokens: 5, messages: [{ role: 'user', content: 'ok' }] }, { timeout: 15_000 });
 }

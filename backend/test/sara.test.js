@@ -29,7 +29,7 @@ test('executa a ferramenta pedida e devolve o texto final', async () => {
   assert.equal(res.type, 'tool_result'); assert.equal(res.tool_use_id, 't1');
   assert.equal(JSON.parse(res.content).income, 3000);
   assert.ok(c.calls[0].tools.length >= 6 && c.calls[0].tools.every((x) => !x.run), 'ferramentas enviadas sem a função run');
-  assert.match(c.calls[0].system, /Sara/);
+  assert.match(c.calls[0].system, /Julia/);
 });
 
 test('isolamento: clinic_id vindo do modelo é ignorado; vale o da sessão', async () => {
@@ -43,7 +43,7 @@ test('isolamento: clinic_id vindo do modelo é ignorado; vale o da sessão', asy
   assert.equal(JSON.parse(toolResult(cA).content).income, 3000);
 });
 
-test('ferramenta desconhecida ou com erro vira tool_result com is_error, sem derrubar a Sara', async () => {
+test('ferramenta desconhecida ou com erro vira tool_result com is_error, sem derrubar a Julia', async () => {
   const c = fakeClient([toolUse('drop_database', {}), text('desculpe')]);
   const r = await ask(A, c);
   assert.equal(r.reply, 'desculpe');

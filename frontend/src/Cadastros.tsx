@@ -2,21 +2,27 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { ApiError, api, brl } from './api';
 import { useLoad } from './hooks';
 import { Icon } from './Icon';
-import { Avatar, Empty, ListSkeleton, PageHead, Sheet, useToast } from './ui';
+import { Avatar, Empty, ListSkeleton, PageHead, Sheet, useRole, useToast } from './ui';
 
 type Opt = { value: string; label: string };
-type Field = { name: string; label: string; type?: 'text' | 'number' | 'date' | 'checkbox' | 'select' | 'textarea' | 'datetime-local';
+export type Field = { name: string; label: string; type?: 'text' | 'email' | 'password' | 'number' | 'date' | 'checkbox' | 'select' | 'textarea' | 'datetime-local';
   options?: Opt[]; required?: boolean; def?: string | boolean; step?: string };
 type Values = Record<string, string | boolean>;
 
 const useList = useLoad;
 
-const errText = (e: unknown) =>
-  e instanceof ApiError && e.status === 403 ? 'Sem permissão para esta ação.'
-  : e instanceof ApiError && e.message === 'validation' ? 'Confira os campos preenchidos.'
+const KNOWN: Record<string, string> = {
+  'email in use': 'Já existe um usuário com esse e-mail.',
+  'wrong password': 'Senha atual incorreta.',
+};
+export const errText = (e: unknown) =>
+  e instanceof ApiError && e.status === 403 && e.message in KNOWN ? KNOWN[e.message]!
+  : e instanceof ApiError && e.status === 403 ? 'Sem permissão para esta ação.'
+  : e instanceof ApiError && e.message === 'validation' ? 'Confira os campos preenchidos (senhas precisam de 10 ou mais caracteres).'
+  : e instanceof ApiError && e.message in KNOWN ? KNOWN[e.message]!
   : e instanceof ApiError && e.status < 500 ? e.message : 'Não foi possível salvar. Tente novamente.';
 
-function AddForm({ fields, label, onSubmit }: { fields: Field[]; label: string; onSubmit: (v: Record<string, unknown>) => Promise<void> }) {
+export function AddForm({ fields, label, onSubmit }: { fields: Field[]; label: string; onSubmit: (v: Record<string, unknown>) => Promise<void> }) {
   const init = () => Object.fromEntries(fields.map((f) => [f.name, f.def ?? (f.type === 'checkbox' ? false : '')])) as Values;
   const [v, setV] = useState<Values>(init);
   const [busy, setBusy] = useState(false);
@@ -46,7 +52,7 @@ function AddForm({ fields, label, onSubmit }: { fields: Field[]; label: string; 
           ) : f.type === 'textarea' ? (
             <textarea rows={3} value={String(v[f.name])} required={f.required} onChange={(e) => setV({ ...v, [f.name]: e.target.value })} />
           ) : (
-            <input type={f.type ?? 'text'} step={f.step} inputMode={f.type === 'number' ? 'decimal' : undefined} value={String(v[f.name])}
+            <input type={f.type ?? 'text'} autoComplete={f.type === 'password' ? 'new-password' : f.type === 'email' ? 'off' : undefined} step={f.step} inputMode={f.type === 'number' ? 'decimal' : undefined} value={String(v[f.name])}
               required={f.required} onChange={(e) => setV({ ...v, [f.name]: e.target.value })} />
           )}
         </label>
@@ -206,17 +212,18 @@ function PatientDetail({ id, onClose }: { id: string; onClose: () => void }) {
 }
 
 function Procedures() {
+  const { isManager } = useRole();
   const l = useList<any[]>('/procedures');
   const [adding, setAdding] = useState(false);
   const toast = useToast();
   return (
     <>
       <PageHead title="Procedimentos" hint="Catálogo e preços">
-        <button className="primary sm" onClick={() => setAdding(true)}><Icon name="plus" size={16} />Novo procedimento</button>
+        {isManager && <button className="primary sm" onClick={() => setAdding(true)}><Icon name="plus" size={16} />Novo procedimento</button>}
       </PageHead>
       <section className="card list-card">
         <Loading error={l.error} ready={!!l.data} />
-        {l.data?.length === 0 && <Empty icon="syringe" title="Nenhum procedimento" text="Cadastre os serviços da clínica com preço e duração."><button className="primary sm" onClick={() => setAdding(true)}>Novo procedimento</button></Empty>}
+        {l.data?.length === 0 && <Empty icon="syringe" title="Nenhum procedimento" text="Cadastre os serviços da clínica com preço e duração.">{isManager && <button className="primary sm" onClick={() => setAdding(true)}>Novo procedimento</button>}</Empty>}
         <ul className="rows">{l.data?.map((p) => (
           <li key={p.id}>
             <div className="row-btn static">
@@ -277,6 +284,7 @@ function StockRow({ p, onDone }: { p: any; onDone: () => void }) {
 }
 
 function Products() {
+  const { isManager } = useRole();
   const l = useList<any[]>('/products');
   const [adding, setAdding] = useState(false);
   const toast = useToast();
@@ -284,7 +292,7 @@ function Products() {
   return (
     <>
       <PageHead title="Produtos" hint={l.data ? (lowCount ? `${lowCount} abaixo do mínimo` : 'Estoque em dia') : undefined}>
-        <button className="primary sm" onClick={() => setAdding(true)}><Icon name="plus" size={16} />Novo produto</button>
+        {isManager && <button className="primary sm" onClick={() => setAdding(true)}><Icon name="plus" size={16} />Novo produto</button>}
       </PageHead>
       <section className="card list-card">
         <Loading error={l.error} ready={!!l.data} />

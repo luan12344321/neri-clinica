@@ -1,4 +1,4 @@
-// Fonte única das consultas: usadas pelas rotas REST e pelas ferramentas da Sara.
+// Fonte única das consultas: usadas pelas rotas REST e pelas ferramentas da Julia.
 import { q } from './db.js';
 
 export async function getDashboard(clinicId) {
@@ -87,7 +87,7 @@ export async function buildDre(clinicId, monthStart) {
     impostosLucro: v('impostos_lucro'), lucroLiquido: resultadoAntesImpostos - v('impostos_lucro') };
 }
 
-// "Consultoria" v1: regras determinísticas sobre os dados (a Sara pode narrar o resultado).
+// "Consultoria" v1: regras determinísticas sobre os dados (a Julia pode narrar o resultado).
 export async function getInsights(clinicId) {
   const now = new Date();
   const m = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
