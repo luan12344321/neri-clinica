@@ -2,7 +2,8 @@
 # Passo a passo e variáveis de ambiente: DEPLOY.md
 
 [build]
-  command = "npm --prefix backend ci --omit=dev && npm --prefix frontend ci && npm --prefix frontend run build"
+  # backend/node_modules é copiado para a raiz: o empacotador das funções só procura dependências (ex.: pg) acima de netlify/functions
+  command = "npm --prefix backend ci --omit=dev && rm -rf node_modules && cp -r backend/node_modules node_modules && npm --prefix frontend ci && npm --prefix frontend run build"
   publish = "frontend/dist"
   functions = "netlify/functions"
 
