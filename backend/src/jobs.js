@@ -104,7 +104,22 @@ export function startJobs(log) {
   at('*/5 * * * *', 'googleSync');
 }
 
-// Troque pela WhatsApp Cloud API (Meta) ou Z-API/Twilio. Fora da janela de 24h exige template aprovado.
+// WhatsApp Cloud API (Meta). Sem WHATSAPP_TOKEN/WHATSAPP_PHONE_ID o envio falha e a mensagem fica 'failed':
+// nunca é marcada como enviada sem ter saído. Fora da janela de 24h a Meta só aceita modelo aprovado:
+// com WHATSAPP_TEMPLATE o texto vai como variável {{1}} desse modelo (idioma pt_BR).
 async function sendWhatsApp(phone, text) {
-  console.log(`[whatsapp:stub] -> ${phone}: ${text}`);
+  const { WHATSAPP_TOKEN: token, WHATSAPP_PHONE_ID: id, WHATSAPP_TEMPLATE: template } = process.env;
+  if (!token || !id) throw new Error('WhatsApp não configurado (WHATSAPP_TOKEN e WHATSAPP_PHONE_ID)');
+  const to = String(phone ?? '').replace(/\D/g, '');
+  if (!to) throw new Error('paciente sem telefone');
+  const content = template
+    ? { type: 'template', template: { name: template, language: { code: 'pt_BR' },
+        components: [{ type: 'body', parameters: [{ type: 'text', text: text.replace(/\s*\n+\s*/g, ' ') }] }] } }
+    : { type: 'text', text: { body: text } };
+  const res = await fetch(`https://graph.facebook.com/v21.0/${id}/messages`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ messaging_product: 'whatsapp', to, ...content }),
+  });
+  if (!res.ok) throw new Error(`WhatsApp ${res.status}: ${(await res.text()).slice(0, 300)}`);
 }

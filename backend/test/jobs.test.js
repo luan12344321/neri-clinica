@@ -6,7 +6,9 @@ let t, tasks, tasks_tick;
 before(async () => {
   t = await setup();
   ({ tasks, tick: tasks_tick } = await import('../src/jobs.js'));
-  mock.method(console, 'log', () => {}); // silencia o stub de WhatsApp
+  mock.method(console, 'log', () => {});
+  Object.assign(process.env, { WHATSAPP_TOKEN: 'token-de-teste', WHATSAPP_PHONE_ID: '123' });
+  mock.method(globalThis, 'fetch', async () => new Response('{}', { status: 200 })); // WhatsApp não sai de verdade
 });
 after(() => t.close());
 beforeEach(async () => { await t.reset(); });
@@ -54,10 +56,26 @@ test('outbox: envia pendentes, marca como enviado e não reenvia', async () => {
   await tasks.birthday();
   await tasks.outbox();
   assert.deepEqual(await queue(), [{ kind: 'birthday', status: 'sent' }]);
-  const sent = console.log.mock.calls.length;
+  const calls = fetch.mock.calls;
+  const sent = calls.length;
   await tasks.outbox();
-  assert.equal(console.log.mock.calls.length, sent);
-  assert.match(console.log.mock.calls.at(-1).arguments[0], /Parabéns, Paciente/); // {{nome}} = 1º nome
+  assert.equal(calls.length, sent);
+  const [url, init] = calls.at(-1).arguments;
+  assert.match(url, /graph\.facebook\.com\/.+\/123\/messages$/);
+  assert.equal(init.headers.authorization, 'Bearer token-de-teste');
+  const body = JSON.parse(init.body);
+  assert.match(body.to, /^\d+$/); // só dígitos, sem "+"
+  assert.match(body.text.body, /Parabéns, Paciente/); // {{nome}} = 1º nome
+});
+
+test('outbox: sem WhatsApp configurado a mensagem fica failed, não enviada', async () => {
+  const { WHATSAPP_TOKEN } = process.env;
+  delete process.env.WHATSAPP_TOKEN;
+  try {
+    await tasks.birthday();
+    await tasks.outbox();
+  } finally { process.env.WHATSAPP_TOKEN = WHATSAPP_TOKEN; }
+  assert.deepEqual(await queue(), [{ kind: 'birthday', status: 'failed' }]);
 });
 
 test('outbox: reserva travada há muito tempo é reenviada; reserva recente não', async () => {

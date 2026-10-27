@@ -41,6 +41,8 @@ O Netlify não mantém servidor ligado, por isso o `node-cron` do `server.js` n�
 | `PG_POOL_MAX` | `3` |
 | `SARA_BUDGET_MS` | `40000` (veja "Limites") |
 | `APP_URL` | `https://SEU-SITE.netlify.app` |
+| `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_ID` | token permanente e ID do número da Cloud API da Meta (marque o token como secreto) |
+| `WHATSAPP_TEMPLATE` | nome do modelo aprovado, para mensagens fora da janela de 24h (opcional) |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | só se for usar Google Agenda |
 | `GOOGLE_REDIRECT_URI` | `https://SEU-SITE.netlify.app/api/google/callback` (cadastre o mesmo no Google Cloud) |
 
@@ -56,7 +58,7 @@ Por linha de comando (opcional): `npx netlify-cli login`, `npx netlify-cli link`
 - **Guarde a `ENCRYPTION_KEY` em dois lugares** (por exemplo, gerenciador de senhas e cofre da empresa), fora do Netlify. Sem ela, os dados cifrados são irrecuperáveis.
 - **Backups:** confirme no provedor do banco que há backup automático e quanto tempo ele retém. Teste uma restauração antes de depender dela.
 - **Contas e termos:** LGPD exige base legal, política de privacidade e contrato com os operadores (Netlify, Neon/Supabase, Anthropic, Google). A Sara consulta apenas agregados (faturamento, procedimentos, estoque) e não envia nomes de pacientes ao modelo, mas confirme isso com quem responde juridicamente pela clínica.
-- **WhatsApp:** o envio ainda é um stub (`sendWhatsApp` em `backend/src/jobs.js`). As mensagens ficam na fila e são marcadas como enviadas **sem sair de fato**. Não ligue a automação para pacientes antes de integrar um provedor real.
+- **WhatsApp:** o envio usa a Cloud API da Meta (`sendWhatsApp` em `backend/src/jobs.js`). Sem `WHATSAPP_TOKEN` e `WHATSAPP_PHONE_ID` as mensagens ficam como `failed` na fila (nunca "enviadas" sem sair). Mensagens iniciadas pela clínica fora da janela de 24h só são aceitas com modelo aprovado: crie o modelo na Meta (idioma pt_BR, corpo com uma variável `{{1}}`) e informe o nome em `WHATSAPP_TEMPLATE`.
 
 ## Limites do Netlify que afetam o app
 
