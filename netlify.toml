@@ -1,0 +1,38 @@
+# Deploy no Netlify: frontend estático (PWA) + API como função serverless + cron como função agendada.
+# Passo a passo e variáveis de ambiente: DEPLOY.md
+
+[build]
+  command = "npm --prefix backend ci --omit=dev && npm --prefix frontend ci && npm --prefix frontend run build"
+  publish = "frontend/dist"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[functions]
+  node_bundler = "esbuild"
+  # driver nativo opcional do `pg`; não é usado (carregado só sob demanda)
+  external_node_modules = ["pg-native"]
+
+# /api/* é atendido pela função netlify/functions/api.mjs (avaliada antes dos redirects).
+# Qualquer outra rota cai no app de página única.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "no-referrer"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains"
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+
+# Service worker e manifesto sempre revalidados (atualização do app sem cache velho)
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"

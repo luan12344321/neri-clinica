@@ -1,0 +1,186 @@
+import Fastify from 'fastify';
+import cors from '@fastify/cors';
+import jwt from '@fastify/jwt';
+import rateLimit from '@fastify/rate-limit';
+import bcrypt from 'bcryptjs';
+import { z } from 'zod';
+import { q } from './db.js';
+import { audit } from './audit.js';
+import { askSara } from './sara.js';
+import googleRoutes, { pushAppointment } from './google.js';
+import { getDashboard, getFinanceSummary, getTopProcedures, getRestock, buildDre } from './queries.js';
+
+const isTest = process.env.NODE_ENV === 'test';
+const DUMMY_HASH = bcrypt.hashSync('dummy-password-for-timing', 10);
+const app = Fastify({ logger: isTest ? false : { redact: ['req.headers.authorization'] } });
+// Em produção o app e a API são da mesma origem (/api), então CORS fica desligado, salvo lista explícita.
+await app.register(cors, { origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : false });
+if (!isTest) await app.register(rateLimit, { max: 120, timeWindow: '1 minute' });
+await app.register(jwt, { secret: process.env.JWT_SECRET });
+
+app.setErrorHandler((err, req, reply) => {
+  if (err instanceof z.ZodError) return reply.code(400).send({ error: 'validation', issues: err.issues });
+  if (err.statusCode && err.statusCode < 500) return reply.code(err.statusCode).send({ error: err.message });
+  req.log.error(err);
+  reply.code(500).send({ error: 'internal' });
+});
+
+app.decorate('auth', async (req, reply) => {
+  try { await req.jwtVerify(); } catch { return reply.code(401).send({ error: 'unauthorized' }); }
+  if (!req.user.clinicId) reply.code(401).send({ error: 'unauthorized' }); // ex.: token de `state` do OAuth não autentica
+});
+const guard = { onRequest: [app.auth] };
+await app.register((await import('./cadastros.js')).default);
+await app.register(googleRoutes);
+await app.register((await import('./prontuario.js')).default);
+const clinic = (req) => req.user.clinicId;
+
+// ---------- Auth ----------
+app.post('/auth/login', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
+  const { email, password } = z.object({ email: z.string().email(), password: z.string() }).parse(req.body);
+  const [u] = await q('SELECT id, clinic_id, role, password_hash FROM users WHERE email=$1', [email.toLowerCase()]);
+  // Limite de tentativas no banco (o rate limit em memória não vale entre invocações serverless):
+  // 5 falhas em 15 min para o mesmo usuário vindas do mesmo IP bloqueiam esse IP, sem trancar o dono da conta.
+  if (u) {
+    const [{ n }] = await q(`SELECT count(*)::int n FROM audit_log WHERE user_id=$1 AND ip=$2
+      AND action='auth.login_failed' AND created_at > now() - interval '15 minutes'`, [u.id, req.ip]);
+    if (n >= 5) return reply.code(429).send({ error: 'too many attempts' });
+  }
+  // compara sempre (mesmo sem usuário) para o tempo de resposta não revelar se o e-mail existe
+  const ok = await bcrypt.compare(password, u?.password_hash ?? DUMMY_HASH);
+  if (!u || !ok) {
+    if (u) await audit({ clinicId: u.clinic_id, userId: u.id, ip: req.ip }, 'auth.login_failed', 'user', u.id);
+    return reply.code(401).send({ error: 'invalid credentials' });
+  }
+  await audit({ clinicId: u.clinic_id, userId: u.id, ip: req.ip }, 'auth.login', 'user', u.id);
+  return { token: app.jwt.sign({ userId: u.id, clinicId: u.clinic_id, role: u.role }, { expiresIn: '12h' }) };
+});
+
+// ---------- Dashboard / agenda ----------
+app.get('/dashboard', guard, (req) => getDashboard(clinic(req)));
+
+app.get('/appointments', guard, async (req) => {
+  const { from, to } = z.object({ from: z.string().date(), to: z.string().date() }).parse(req.query);
+  return q(`SELECT a.*, p.full_name AS patient, pr.name AS procedure
+            FROM appointments a JOIN patients p ON p.id=a.patient_id
+            LEFT JOIN procedures pr ON pr.id=a.procedure_id
+            WHERE a.clinic_id=$1 AND a.starts_at >= $2 AND a.starts_at < $3::date + 1
+            ORDER BY a.starts_at`, [clinic(req), from, to]);
+});
+
+const apptBody = z.object({
+  patientId: z.guid(), procedureId: z.guid().optional(),
+  professionalId: z.guid().optional(),
+  startsAt: z.string().datetime(), endsAt: z.string().datetime(), price: z.number().positive().optional(),
+});
+app.post('/appointments', guard, async (req, reply) => {
+  const b = apptBody.parse(req.body);
+  const [row] = await q(
+    `INSERT INTO appointments (clinic_id, patient_id, procedure_id, professional_id, starts_at, ends_at, price)
+     SELECT $1,$2,$3,$4,$5,$6, COALESCE($7, (SELECT default_price FROM procedures WHERE id=$3 AND clinic_id=$1))
+     WHERE EXISTS (SELECT 1 FROM patients WHERE id=$2 AND clinic_id=$1)
+     RETURNING *`,
+    [clinic(req), b.patientId, b.procedureId ?? null, b.professionalId ?? null, b.startsAt, b.endsAt, b.price ?? null]);
+  if (!row) return reply.code(404).send({ error: 'patient not found' });
+  pushAppointment(row.id).catch((e) => req.log.error(e)); // se falhar, o cron de sync reenvia
+  return reply.code(201).send(row);
+});
+
+// Reagendar / confirmar / cancelar
+app.patch('/appointments/:id', guard, async (req, reply) => {
+  const { id } = z.object({ id: z.guid() }).parse(req.params);
+  const b = z.object({ startsAt: z.string().datetime().optional(), endsAt: z.string().datetime().optional(),
+    status: z.enum(['confirmed', 'canceled', 'no_show']).optional() })
+    .refine((v) => (!v.startsAt) === (!v.endsAt), 'startsAt e endsAt andam juntos').parse(req.body);
+  const [row] = await q(
+    `UPDATE appointments SET starts_at=COALESCE($3,starts_at), ends_at=COALESCE($4,ends_at),
+       status=COALESCE($5,status), updated_at=now()
+     WHERE id=$1 AND clinic_id=$2 AND status IN ('scheduled','confirmed') RETURNING *`,
+    [id, clinic(req), b.startsAt ?? null, b.endsAt ?? null, b.status ?? null]);
+  if (!row) return reply.code(404).send({ error: 'not found or already closed' });
+  pushAppointment(row.id).catch((e) => req.log.error(e));
+  return row;
+});
+
+// Concluir atendimento: gera receita + baixa de estoque pelo protocolo (tudo em uma transação)
+app.post('/appointments/:id/complete', guard, async (req, reply) => {
+  const { id } = z.object({ id: z.guid() }).parse(req.params);
+  const { pool } = await import('./db.js');
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    const { rows: [a] } = await c.query(
+      `UPDATE appointments SET status='done', completed_at=now(), updated_at=now()
+       WHERE id=$1 AND clinic_id=$2 AND status IN ('scheduled','confirmed') RETURNING *`, [id, clinic(req)]);
+    if (!a) { await c.query('ROLLBACK'); return reply.code(409).send({ error: 'not completable' }); }
+    if (a.price) {
+      await c.query(
+        `INSERT INTO transactions (clinic_id,type,category_id,appointment_id,description,amount,competence_date,due_date,status)
+         SELECT $1,'income',
+                (SELECT id FROM categories WHERE clinic_id=$1 AND kind='income' AND dre_group='receita_bruta' ORDER BY name LIMIT 1),
+                $2,'Atendimento',$3, d, d, 'pending'
+         FROM (SELECT (now() AT TIME ZONE timezone)::date AS d FROM clinics WHERE id=$1) c`,
+        [a.clinic_id, a.id, a.price]);
+    }
+    await c.query(
+      `WITH items AS (
+         SELECT pi.product_id, pi.quantity FROM protocols p
+         JOIN protocol_items pi ON pi.protocol_id=p.id
+         WHERE p.clinic_id=$1 AND p.procedure_id=$2),
+       mv AS (INSERT INTO stock_movements (clinic_id,product_id,delta,reason,appointment_id)
+              SELECT $1, product_id, -quantity, 'usage', $3 FROM items RETURNING product_id, delta)
+       UPDATE products pr SET quantity = pr.quantity + mv.delta FROM mv WHERE pr.id = mv.product_id`,
+      [a.clinic_id, a.procedure_id, a.id]);
+    await c.query('COMMIT');
+    return a;
+  } catch (e) { await c.query('ROLLBACK'); throw e; } finally { c.release(); }
+});
+
+// ---------- Pacientes ----------
+app.get('/patients', guard, (req) => {
+  const { search = '' } = req.query;
+  return q(`SELECT id, full_name, birth_date, phone FROM patients
+            WHERE clinic_id=$1 AND full_name ILIKE $2 ORDER BY full_name LIMIT 50`, [clinic(req), `%${search}%`]);
+});
+// POST /patients, ficha com CPF e prontuário: ver prontuario.js (dados sensíveis, cifrados e auditados)
+
+// ---------- Financeiro ----------
+app.get('/finance/summary', guard, (req) => {
+  const { month } = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/) }).parse(req.query);
+  return getFinanceSummary(clinic(req), `${month}-01`);
+});
+app.get('/finance/top-procedures', guard, (req) => getTopProcedures(clinic(req), 6));
+app.get('/finance/dre', guard, (req) => {
+  const { month } = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/) }).parse(req.query);
+  return buildDre(clinic(req), `${month}-01`);
+});
+app.get('/finance/payables', guard, (req) =>
+  q(`SELECT * FROM transactions WHERE clinic_id=$1 AND type='expense' AND status='pending' ORDER BY due_date`, [clinic(req)]));
+app.get('/finance/receivables', guard, (req) =>
+  q(`SELECT * FROM transactions WHERE clinic_id=$1 AND type='income' AND status='pending' ORDER BY due_date`, [clinic(req)]));
+app.post('/finance/transactions/:id/pay', guard, async (req, reply) => {
+  const { id } = req.params;
+  const [row] = await q(`UPDATE transactions SET status='paid', paid_at=now()
+    WHERE id=$1 AND clinic_id=$2 AND status='pending' RETURNING *`, [id, clinic(req)]);
+  return row ?? reply.code(404).send({ error: 'not found' });
+});
+
+// ---------- Estoque ----------
+app.get('/stock/restock', guard, (req) => getRestock(clinic(req)));
+app.get('/protocols', guard, (req) =>
+  q(`SELECT p.*, COALESCE(json_agg(json_build_object('product', pr.name, 'quantity', pi.quantity))
+        FILTER (WHERE pr.id IS NOT NULL), '[]') AS items
+     FROM protocols p LEFT JOIN protocol_items pi ON pi.protocol_id=p.id
+     LEFT JOIN products pr ON pr.id=pi.product_id
+     WHERE p.clinic_id=$1 GROUP BY p.id`, [clinic(req)]));
+
+// ---------- Sara ----------
+app.post('/sara/chat', { ...guard, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => {
+  const { message, conversationId } = z.object({
+    message: z.string().min(1).max(2000), conversationId: z.guid().optional() }).parse(req.body);
+  return askSara({ clinicId: clinic(req), userId: req.user.userId, message, conversationId });
+});
+
+app.get('/health', async () => ({ ok: true }));
+
+export default app;

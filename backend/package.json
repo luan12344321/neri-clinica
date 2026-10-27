@@ -1,0 +1,28 @@
+{
+  "name": "clinica-backend",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --env-file=.env src/server.js",
+    "start": "node --env-file=.env src/server.js",
+    "db:init": "node --env-file=.env scripts/seed.js",
+    "db:schema": "node --env-file=.env scripts/migrate.js",
+    "clinic:create": "node --env-file=.env scripts/create-clinic.js",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.12",
+    "@electric-sql/pglite-socket": "0.2.15"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.70.0",
+    "@fastify/cors": "^10.0.0",
+    "@fastify/jwt": "^10.2.5",
+    "@fastify/rate-limit": "^10.0.0",
+    "bcryptjs": "^3.0.0",
+    "fastify": "^5.0.0",
+    "node-cron": "^4.6.0",
+    "pg": "^8.13.0",
+    "zod": "^4.6.7"
+  }
+}
