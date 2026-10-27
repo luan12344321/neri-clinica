@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Icon, type IconName } from './Icon';
-import { Sheet } from './ui';
+import { Sheet, useInstall } from './ui';
 
 type Item = { id: string; icon: IconName; label: string };
 
@@ -57,5 +57,28 @@ export function Splash() {
       <img className="splash-logo" src="/neri-logo.png" alt="" />
       <span>Gestão da clínica na palma da mão</span>
     </div>
+  );
+}
+
+// "Instalar app" na barra superior: só aparece quando o navegador permite instalar (ou no iPhone, com o passo a passo) e o app ainda não está instalado.
+export function InstallPill() {
+  const { installed, canPrompt, ios, install } = useInstall();
+  const [help, setHelp] = useState(false);
+  if (installed || !(canPrompt || ios)) return null;
+  return (
+    <>
+      <button className="install-pill" aria-label="Instalar aplicativo no celular" onClick={() => (canPrompt ? install() : setHelp(true))}>
+        <Icon name="download" size={18} /><span>Instalar app</span>
+      </button>
+      {help && (
+        <Sheet title="Instalar no iPhone" onClose={() => setHelp(false)}>
+          <ol className="steps">
+            <li>Abra este site no <b>Safari</b>.</li>
+            <li>Toque em <b>Compartilhar</b> (o quadrado com a seta para cima).</li>
+            <li>Escolha <b>Adicionar à Tela de Início</b>.</li>
+          </ol>
+        </Sheet>
+      )}
+    </>
   );
 }

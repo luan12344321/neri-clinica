@@ -135,3 +135,10 @@ test('fluxo de caixa: 6 meses com o que foi efetivamente pago, só da própria c
   const other = await t.call('GET', '/finance/cashflow', { token: await t.tokenFor('b@demo.test') });
   assert.deepEqual(other.json.map((x) => x.income + x.expense), [0, 0, 0, 0, 0, 0]);
 });
+
+test('painel do dia: traz os aniversariantes de hoje (o seed tem o Paciente 1 fazendo aniversário hoje)', async () => {
+  const d = (await t.call('GET', '/dashboard', { token })).json;
+  assert.deepEqual(d.birthdays.map((p) => p.full_name), ['Paciente 1']);
+  const other = (await t.call('GET', '/dashboard', { token: await t.tokenFor('b@demo.test') })).json;
+  assert.deepEqual(other.birthdays, [], 'não vaza pacientes de outra clínica');
+});

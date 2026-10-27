@@ -4,11 +4,11 @@ import { Area, AreaChart, Bar, BarChart, Cell, Pie, PieChart, ResponsiveContaine
 import { ApiError, api, brl, getToken, lastMonths, monthLabel, setToken, thisMonth } from './api';
 import { Icon, type IconName } from './Icon';
 import { AppointmentSheet, Cadastros, NewAppointment, RescheduleSheet, type Section } from './Cadastros';
-import { Avatar, Empty, ErrorBoundary, EyeToggle, ListSkeleton, RoleProvider, ToastProvider, mask, useHideValues, useInstall, useRole } from './ui';
+import { Avatar, Empty, ErrorBoundary, EyeToggle, ListSkeleton, RoleProvider, ToastProvider, mask, useHideValues, useRole } from './ui';
 import { Settings, type Me } from './Settings';
 import { PresenceButton } from './Presence';
 import { Finance, RecentTransactions, type Bank, type FinTab } from './Finance';
-import { BottomNav, QuickSheet, Splash, type QuickAction } from './Chrome';
+import { BottomNav, InstallPill, QuickSheet, Splash, type QuickAction } from './Chrome';
 
 type View = 'inicio' | 'agenda' | 'financeiro' | 'estoque' | 'sara' | 'pacientes' | 'procedimentos' | 'produtos' | 'mensagens' | 'config';
 
@@ -95,6 +95,7 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
         <button ref={menuBtn} className="icon-btn menu-btn" aria-label="Abrir menu" aria-expanded={open} onClick={() => setOpen(true)}><Icon name="menu" /></button>
         <h1>{TITLE_OVERRIDE[view] ?? TITLES[view]}</h1>
         <div className="top-actions">
+          <InstallPill />
           {isOwner && <PresenceButton />}
           <button className="icon-btn" aria-label={nAlerts ? `${nAlerts} alertas de estoque` : 'Sem alertas'} onClick={() => go('estoque')}>
             <Icon name="bell" />{nAlerts > 0 && <span className="dot">{nAlerts}</span>}
@@ -182,27 +183,17 @@ const Status = ({ error, loading }: { error: string; loading: boolean }) =>
 const Delta = ({ value }: { value: number | null }) =>
   value === null ? null : <span className={`delta${value < 0 ? ' down' : ''}`}>{value < 0 ? '▼' : '▲'} {pct(Math.abs(value))}% <i>vs mês anterior</i></span>;
 
-// Convite para instalar o app (só aparece quando o navegador permite instalar, ou no iPhone).
-function InstallBanner({ go }: { go: (v: View, tab?: FinTab) => void }) {
-  const { installed, canPrompt, ios, install } = useInstall();
-  const [hidden, setHidden] = useState(() => { try { return localStorage.getItem('clinica.installHidden') === '1'; } catch { return false; } });
-  if (installed || hidden || !(canPrompt || ios)) return null;
-  const hide = () => { try { localStorage.setItem('clinica.installHidden', '1'); } catch { /* storage bloqueado */ } setHidden(true); };
-  return (
-    <section className="card install-banner span-all">
-      <Icon name="download" size={22} />
-      <div className="grow"><b>Instale o app no celular</b><span className="muted">{canPrompt ? 'Abra direto da tela inicial, como um aplicativo.' : 'Toque em Compartilhar e depois em Adicionar à Tela de Início.'}</span></div>
-      {canPrompt ? <button className="primary sm" onClick={install}>Instalar</button> : <button className="ghost sm" onClick={() => go('config')}>Como</button>}
-      <button className="icon-btn" aria-label="Dispensar" onClick={hide}><Icon name="close" size={18} /></button>
-    </section>
-  );
-}
-
 // ---------- Início ----------
+const localYmd = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+type Todo = { icon: IconName; text: string; hint?: string; tone?: 'bad'; run: () => void };
+
+// O "meu dia" em primeiro lugar: o que atender, o que está pendente e o que pede atenção. Dinheiro vem depois.
 function Today({ name, restock, go, money, onBook }: { name?: string; restock: any[]; go: (v: View, tab?: FinTab) => void; money: boolean; onBook: () => void }) {
   const dash = useLoad<any>('/dashboard');
   const sum = useLoad<any>(money ? `/finance/summary?month=${thisMonth()}` : null);
   const recv = useLoad<any[]>(money ? '/finance/receivables' : null);
+  const pay = useLoad<any[]>(money ? '/finance/payables' : null);
   const banks = useLoad<Bank[]>(money ? '/banks' : null);
   const [busyId, setBusyId] = useState('');
   const [bump, setBump] = useState(0);
@@ -215,22 +206,40 @@ function Today({ name, restock, go, money, onBook }: { name?: string; restock: a
     finally { setBusyId(''); }
   }
   const d = dash.data, s = sum.data;
-  const toReceive = (recv.data ?? []).reduce((a, t) => a + Number(t.amount), 0);
-  const overdue = (recv.data ?? []).filter((t) => String(t.due_date).slice(0, 10) < new Date().toISOString().slice(0, 10));
+  const now = Date.now();
+  const timeOf = (a: any) => new Date(a.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const today: any[] = d?.today ?? [];
+  const pending = today.filter((a) => a.status !== 'done' && a.status !== 'canceled');
+  const doneToday = today.length - pending.length;
+  const ended = (a: any) => new Date(a.ends_at ?? a.starts_at).getTime() < now;
+  const next = pending.find((a) => !ended(a)) ?? null;
+  const late = pending.filter(ended);
+  const todayStr = localYmd();
+  const sumOf = (items: any[]) => items.reduce((acc, t) => acc + Number(t.amount), 0);
+  const dueRecv = (recv.data ?? []).filter((t) => String(t.due_date).slice(0, 10) <= todayStr);
+  const duePay = (pay.data ?? []).filter((t) => String(t.due_date).slice(0, 10) <= todayStr);
+  const birthdays: { id: string; full_name: string }[] = d?.birthdays ?? [];
+
+  const todo: Todo[] = [
+    ...(late.length ? [{ icon: 'alert' as IconName, tone: 'bad' as const, text: `${late.length} atendimento(s) passaram do horário sem ser concluídos`, hint: late.map((a) => `${timeOf(a)} ${a.patient}`).join(' · '),
+      run: () => document.getElementById('agenda-hoje')?.scrollIntoView({ behavior: 'smooth' }) }] : []),
+    ...(dueRecv.length ? [{ icon: 'receive' as IconName, text: `${dueRecv.length} conta(s) a receber vencendo hoje ou vencida(s)`, hint: mask(brl(sumOf(dueRecv)), hidden), run: () => go('financeiro', 'contas') }] : []),
+    ...(duePay.length ? [{ icon: 'pay' as IconName, text: `${duePay.length} conta(s) a pagar vencendo hoje ou vencida(s)`, hint: mask(brl(sumOf(duePay)), hidden), run: () => go('financeiro', 'contas') }] : []),
+    ...(restock.length ? [{ icon: 'box' as IconName, text: `${restock.length} produto(s) para repor`, hint: restock.map((p) => p.name).slice(0, 3).join(', '), run: () => go('estoque') }] : []),
+    ...(birthdays.length ? [{ icon: 'users' as IconName, text: `Aniversário hoje: ${birthdays.map((p) => p.full_name).slice(0, 3).join(', ')}${birthdays.length > 3 ? ` e mais ${birthdays.length - 3}` : ''}`, hint: 'A mensagem automática sai às 9h se a paciente autorizou', run: () => go('pacientes') }] : []),
+  ];
+
+  // Dinheiro (só dono e gerente), mais abaixo
+  const toReceive = sumOf(recv.data ?? []);
   const activeBanks = (banks.data ?? []).filter((b) => b.active);
   const balance = activeBanks.reduce((a, b) => a + b.balance, 0);
-  // Sempre 6 meses (zero onde não há receita): o gráfico mantém forma e a variação tem com o que comparar.
   const byMonth = Object.fromEntries((d?.revenueByMonth ?? []).map((r: any) => [r.month, r.revenue]));
   const series = lastMonths(6).map((month) => ({ month, m: monthLabel(month), revenue: byMonth[month] ?? 0 }));
   const cur = series[series.length - 1]!, prev = series[series.length - 2]!;
   const delta = prev.revenue ? ((cur.revenue - prev.revenue) / prev.revenue) * 100 : null;
   const procTotal = (d?.topProcedures ?? []).reduce((a: number, p: any) => a + p.total, 0);
   const first = name?.split(/\s+/)[0];
-  const doneToday = d ? d.today.filter((a: any) => a.status === 'done').length : 0;
-  const next = d ? d.today.find((a: any) => a.status !== 'done' && a.status !== 'canceled') : null;
-  const timeOf = (a: any) => new Date(a.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  const tip = !money ? null : overdue.length
-    ? { icon: 'alert' as IconName, text: `${overdue.length} recebimento(s) vencido(s) somam ${mask(brl(overdue.reduce((a, t) => a + Number(t.amount), 0)), hidden)}.`, cta: 'Ver contas', run: () => go('financeiro', 'contas') }
+  const tip = !money || todo.some((t) => t.icon === 'receive') ? null
     : delta !== null && delta !== 0
       ? { icon: 'pulse' as IconName, text: `Faturamento ${pct(Math.abs(delta))}% ${delta > 0 ? 'acima' : 'abaixo'} do mês anterior.`, cta: 'Ver resumo', run: () => go('financeiro', 'resumo') }
       : null;
@@ -238,7 +247,7 @@ function Today({ name, restock, go, money, onBook }: { name?: string; restock: a
     { icon: 'calendar', label: 'Agendar', run: onBook },
     { icon: 'users', label: 'Pacientes', run: () => go('pacientes') },
     ...(money ? [{ icon: 'receive' as IconName, label: 'Receber', run: () => go('financeiro', 'contas') }, { icon: 'bank' as IconName, label: 'Bancos', run: () => go('financeiro', 'bancos') }]
-      : [{ icon: 'box' as IconName, label: 'Estoque', run: () => go('estoque') }, { icon: 'calendar' as IconName, label: 'Agenda', run: () => go('agenda') }]),
+      : [{ icon: 'box' as IconName, label: 'Estoque', run: () => go('estoque') }, { icon: 'syringe' as IconName, label: 'Procedimentos', run: () => go('procedimentos') }]),
   ];
 
   return (
@@ -248,9 +257,68 @@ function Today({ name, restock, go, money, onBook }: { name?: string; restock: a
         <p className="muted">{new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
       </section>
       <div className="span-all"><Status error={dash.error || sum.error} loading={!d || (money && !s)} /></div>
-      <InstallBanner go={go} />
       {d && (!money || s) && (
         <>
+          <section className="day-stats span-all" aria-label="Resumo do dia">
+            <button onClick={() => document.getElementById('agenda-hoje')?.scrollIntoView({ behavior: 'smooth' })}><strong>{today.length}</strong><span>atendimento(s) hoje</span></button>
+            <button onClick={() => document.getElementById('agenda-hoje')?.scrollIntoView({ behavior: 'smooth' })}><strong>{pending.length}</strong><span>a fazer · {doneToday} feito(s)</span></button>
+            <button className={todo.length ? 'warn' : ''} onClick={() => document.getElementById('pendencias')?.scrollIntoView({ behavior: 'smooth' })}><strong>{todo.length}</strong><span>{todo.length === 1 ? 'pendência' : 'pendências'}</span></button>
+          </section>
+
+          <section className="next-card span-all">
+            <span className="next-label">Próximo atendimento</span>
+            {next ? (
+              <>
+                <div className="next-main">
+                  <Avatar name={next.patient} size={46} />
+                  <div className="grow"><b>{next.patient}</b><span>{next.procedure ?? 'Sem procedimento'}</span></div>
+                  <span className="next-time"><Icon name="calendar" size={16} />{timeOf(next)}</span>
+                </div>
+                <div className="next-actions">
+                  <button className="ghost" onClick={() => setMoving(next)}>Reagendar</button>
+                  <button className="primary" disabled={busyId === next.id} onClick={() => complete(next.id)}>Concluir</button>
+                </div>
+              </>
+            ) : <p className="next-empty">{today.length === 0 ? 'Nenhum atendimento para hoje.' : late.length ? 'Os atendimentos restantes de hoje já passaram do horário.' : 'Todos os atendimentos de hoje foram concluídos.'}</p>}
+          </section>
+
+          <section className="card" id="agenda-hoje">
+            <div className="between"><h2>Agenda de hoje</h2><button className="link" onClick={() => go('agenda')}>Ver agenda completa</button></div>
+            {today.length === 0 ? <Empty icon="calendar" title="Dia livre" text="Nenhum atendimento hoje."><button className="primary sm" onClick={onBook}>Agendar</button></Empty> : (
+              <ul className="rows">
+                {today.map((a: any) => (
+                  <li key={a.id}>
+                    <div>
+                      <b>{timeOf(a)}</b>{' '}{a.patient}
+                      <div className="muted">{a.procedure ?? 'Sem procedimento'}</div>
+                    </div>
+                    {a.status === 'done' ? <span className="pill ok">Concluído</span>
+                      : <button className="primary sm" disabled={busyId === a.id} onClick={() => complete(a.id)}>Concluir</button>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="card" id="pendencias">
+            <h2>O que precisa de atenção hoje</h2>
+            {todo.length === 0 ? <Empty icon="check" title="Tudo em dia" text="Nada pendente por enquanto." /> : (
+              <ul className="todo">{todo.map((t) => (
+                <li key={t.text}>
+                  <button onClick={t.run}>
+                    <span className={`q-ico ${t.tone === 'bad' ? 'bad' : ''}`}><Icon name={t.icon} size={20} /></span>
+                    <span className="grow"><b>{t.text}</b>{t.hint && <span className="muted wrap">{t.hint}</span>}</span>
+                    <Icon name="back" size={18} />
+                  </button>
+                </li>
+              ))}</ul>
+            )}
+          </section>
+
+          <section className="quick-actions span-all" aria-label="Ações rápidas">
+            {quick.map((q) => <button key={q.label} onClick={q.run}><span><Icon name={q.icon} size={22} /></span>{q.label}</button>)}
+          </section>
+
           {money && s && (
             <section className="hero-card span-all">
               <div className="hero-main">
@@ -272,26 +340,13 @@ function Today({ name, restock, go, money, onBook }: { name?: string; restock: a
             </section>
           )}
 
-          <section className="quick-actions span-all" aria-label="Ações rápidas">
-            {quick.map((q) => <button key={q.label} onClick={q.run}><span><Icon name={q.icon} size={22} /></span>{q.label}</button>)}
-          </section>
-
-          <section className="next-card span-all">
-            <span className="next-label">Próximo atendimento</span>
-            {next ? (
-              <>
-                <div className="next-main">
-                  <Avatar name={next.patient} size={46} />
-                  <div className="grow"><b>{next.patient}</b><span>{next.procedure ?? 'Sem procedimento'}</span></div>
-                  <span className="next-time"><Icon name="calendar" size={16} />{timeOf(next)}</span>
-                </div>
-                <div className="next-actions">
-                  <button className="ghost" onClick={() => setMoving(next)}>Reagendar</button>
-                  <button className="primary" disabled={busyId === next.id} onClick={() => complete(next.id)}>Concluir</button>
-                </div>
-              </>
-            ) : <p className="next-empty">{d.today.length ? 'Todos os atendimentos de hoje foram concluídos.' : 'Nenhum atendimento para hoje.'}</p>}
-          </section>
+          {money && s && (
+            <section className="kpis span-all">
+              <button className="kpi" onClick={() => go('financeiro')}><Icon name="syringe" size={18} /><span>Procedimentos no mês</span><strong>{s.proceduresDone}</strong></button>
+              <button className="kpi" onClick={() => go('financeiro')}><Icon name="wallet" size={18} /><span>Ticket médio</span><strong>{mask(brl(s.averageTicket), hidden)}</strong></button>
+              <button className="kpi" onClick={() => go('financeiro', 'contas')}><Icon name="receive" size={18} /><span>A receber</span><strong>{mask(brl(toReceive), hidden)}</strong><small>{recv.data?.length ?? 0} pendente(s) de pagamento</small></button>
+            </section>
+          )}
 
           {tip && (
             <section className="card tip span-all">
@@ -300,44 +355,6 @@ function Today({ name, restock, go, money, onBook }: { name?: string; restock: a
               <button className="link" onClick={tip.run}>{tip.cta}</button>
             </section>
           )}
-
-          <section className="kpis span-all">
-            <button className="kpi" onClick={() => go('agenda')}><Icon name="calendar" size={18} /><span>Atendimentos hoje</span><strong>{d.today.length}</strong><small>{doneToday} concluído(s)</small></button>
-            {money && s && (<>
-              <button className="kpi" onClick={() => go('financeiro')}><Icon name="syringe" size={18} /><span>Procedimentos no mês</span><strong>{s.proceduresDone}</strong></button>
-              <button className="kpi" onClick={() => go('financeiro')}><Icon name="wallet" size={18} /><span>Ticket médio</span><strong>{mask(brl(s.averageTicket), hidden)}</strong></button>
-              <button className="kpi" onClick={() => go('financeiro', 'contas')}><Icon name="receive" size={18} /><span>A receber</span><strong>{mask(brl(toReceive), hidden)}</strong><small>{recv.data?.length ?? 0} pendente(s) de pagamento</small></button>
-            </>)}
-          </section>
-
-          {restock.length > 0 && (
-            <section className="card warn">
-              <div className="between"><h2>Atenção</h2><button className="link" onClick={() => go('estoque')}>Ver estoque e reposição</button></div>
-              <ul className="rows">
-                {restock.map((p) => (
-                  <li key={p.name}><span>Repor <b>{p.name}</b></span><span className="muted">tem {p.quantity} · comprar {p.qty_to_buy}</span></li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          <section className="card">
-            <div className="between"><h2>Agenda de hoje</h2><button className="link" onClick={() => go('agenda')}>Ver agenda completa</button></div>
-            {d.today.length === 0 ? <Empty icon="calendar" title="Dia livre" text="Nenhum atendimento hoje.">{<button className="primary sm" onClick={onBook}>Agendar</button>}</Empty> : (
-              <ul className="rows">
-                {d.today.map((a: any) => (
-                  <li key={a.id}>
-                    <div>
-                      <b>{timeOf(a)}</b>{' '}{a.patient}
-                      <div className="muted">{a.procedure ?? 'Sem procedimento'}</div>
-                    </div>
-                    {a.status === 'done' ? <span className="pill ok">Concluído</span>
-                      : <button className="primary sm" disabled={busyId === a.id} onClick={() => complete(a.id)}>Concluir</button>}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
 
           {money && <RecentTransactions limit={5} reloadKey={bump} onSeeAll={() => go('financeiro', 'contas')} />}
 

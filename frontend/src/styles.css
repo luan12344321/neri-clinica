@@ -464,3 +464,25 @@ button.ghost.danger { color: var(--neg); border-color: color-mix(in srgb, var(--
 .credit { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 14px 16px; border-radius: var(--radius); background: var(--hero); color: var(--hero-ink); font-size: 13px; }
 .credit span { opacity: .7; }
 .credit img { height: 26px; width: auto; }
+
+/* ---------- Início como painel do dia ---------- */
+.day-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.day-stats button { display: grid; gap: 2px; text-align: left; padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); color: inherit; }
+.day-stats strong { font-size: 28px; letter-spacing: -0.03em; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.day-stats span { font-size: 12px; color: var(--muted); }
+.day-stats button.warn { background: var(--warn-soft); border-color: transparent; }
+.day-stats button.warn strong { color: var(--warn); }
+.todo { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.todo button { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 0; text-align: left; background: none; border: 0; color: inherit; border-top: 1px solid var(--line); }
+.todo li:first-child button { border-top: 0; }
+.todo .grow .wrap { white-space: normal; }
+.todo .ico:last-child { transform: rotate(180deg); color: var(--muted); flex: none; }
+.install-pill { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px 0 10px; border: 1px solid var(--accent); border-radius: 99px; background: var(--accent-soft); color: var(--accent); font-size: 13px; font-weight: 650; white-space: nowrap; }
+.install-pill:active { background: var(--accent); color: var(--accent-ink); }
+@media (max-width: 430px) { .top h1 { font-size: 16px; } .install-pill { padding: 0 10px 0 8px; } }
+.kpis > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+@media (max-width: 430px) {
+  /* com o botão "Instalar app" visível não sobra espaço para o título; a barra inferior já mostra onde você está */
+  .top:has(.install-pill) h1 { display: none; }
+  .top:has(.install-pill) .top-actions { margin-left: auto; }
+}

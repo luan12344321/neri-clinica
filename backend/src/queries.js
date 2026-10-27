@@ -2,7 +2,7 @@
 import { q } from './db.js';
 
 export async function getDashboard(clinicId) {
-  const [today, revenue, top] = await Promise.all([
+  const [today, revenue, top, birthdays] = await Promise.all([
     q(`SELECT a.id, a.starts_at, a.ends_at, a.status, p.full_name AS patient, pr.name AS procedure
        FROM appointments a JOIN patients p ON p.id=a.patient_id
        LEFT JOIN procedures pr ON pr.id=a.procedure_id
@@ -12,8 +12,13 @@ export async function getDashboard(clinicId) {
        ORDER BY a.starts_at`, [clinicId]),
     getRevenueByMonth(clinicId, 6),
     getTopProcedures(clinicId, 6),
+    // aniversariantes de hoje (data no fuso da clínica)
+    q(`SELECT p.id, p.full_name FROM patients p JOIN clinics c ON c.id=p.clinic_id
+       WHERE p.clinic_id=$1 AND p.birth_date IS NOT NULL
+         AND to_char(p.birth_date, 'MMDD') = to_char(now() AT TIME ZONE c.timezone, 'MMDD')
+       ORDER BY p.full_name LIMIT 20`, [clinicId]),
   ]);
-  return { today, revenueByMonth: revenue, topProcedures: top };
+  return { today, birthdays, revenueByMonth: revenue, topProcedures: top };
 }
 
 export const getRevenueByMonth = (clinicId, months) =>
