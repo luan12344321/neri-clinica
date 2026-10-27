@@ -16,6 +16,7 @@ const DUMMY_HASH = bcrypt.hashSync('dummy-password-for-timing', 10);
 // O app é público em /api/* (Vercel, Netlify, proxy do vite), mas as rotas são registradas na raiz: removemos o prefixo aqui.
 const app = Fastify({
   logger: isTest ? false : { redact: ['req.headers.authorization'] },
+  trustProxy: Boolean(process.env.VERCEL), // atrás da Vercel o IP do cliente vem em x-forwarded-for (auditoria e limite de login)
   rewriteUrl: (req) => req.url.replace(/^\/api(?=\/|\?|$)/, '') || '/',
 });
 // Em produção o app e a API são da mesma origem (/api), então CORS fica desligado, salvo lista explícita.
