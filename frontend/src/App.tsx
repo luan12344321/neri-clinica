@@ -174,14 +174,14 @@ function Today({ name, alerts }: { name?: string; alerts: any[] }) {
           <section className="hero-card">
             <span>Faturamento do mês</span>
             <strong>{brl(s.income)}</strong>
-            <Delta value={delta} />
+            {delta === null ? <span className="delta flat">Sem mês anterior para comparar</span> : <Delta value={delta} />}
             <div className="spark" aria-hidden="true">
               <ResponsiveContainer width="100%" height={64}>
                 <AreaChart data={series} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
                   <defs><linearGradient id="g-hero" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" style={{ stopColor: 'var(--yellow)', stopOpacity: 0.35 }} /><stop offset="100%" style={{ stopColor: 'var(--yellow)', stopOpacity: 0 }} />
                   </linearGradient></defs>
-                  <Area type="monotone" dataKey="revenue" stroke="var(--yellow)" strokeWidth={2} fill="url(#g-hero)" isAnimationActive={false} />
+                  <Area type="monotone" dataKey="revenue" stroke="var(--yellow)" strokeWidth={2} fill="url(#g-hero)" isAnimationActive={false} dot={series.length < 2 ? { r: 4, fill: 'var(--yellow)' } : false} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -236,7 +236,7 @@ function Today({ name, alerts }: { name?: string; alerts: any[] }) {
                   <YAxis tickLine={false} axisLine={false} width={44} tick={{ fill: 'var(--muted)', fontSize: 12 }} tickFormatter={(v) => (v >= 1000 ? `${v / 1000}k` : v)} />
                   <Tooltip formatter={(v: number) => [brl(v), 'Receita']}
                     contentStyle={{ background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--ink)' }} />
-                  <Area type="monotone" dataKey="revenue" stroke="var(--accent)" strokeWidth={2.5} fill="url(#g-rev)" />
+                  <Area type="monotone" dataKey="revenue" stroke="var(--accent)" strokeWidth={2.5} fill="url(#g-rev)" dot={series.length < 2 ? { r: 5, fill: 'var(--accent)' } : false} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>

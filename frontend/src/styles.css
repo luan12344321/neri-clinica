@@ -5,16 +5,7 @@
   --warn: #9a5b00; --warn-soft: #fbefd5; --ok: #1d6b3a; --ok-soft: #dff1e4; --neg: #b3261e;
   --c1: #1d4d3b; --c2: #e0a82e; --c3: #4f9d7b; --c4: #c8553d; --c5: #5a7fb5; --c6: #9a8f7a;
   --radius: 16px; --top-h: 60px;
-  color-scheme: light dark;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1513; --card: #172120; --ink: #e8efed; --muted: #92a09c; --line: #26322f;
-    --accent: #5fbf98; --accent-ink: #06201a; --accent-soft: #1b3a31;
-    --hero: #1b4636; --hero-ink: #f1f6f3; --yellow: #f0dc5a; --yellow-ink: #26230a;
-    --warn: #f0b95a; --warn-soft: #3a2d12; --ok: #7bd49a; --ok-soft: #16301f; --neg: #ff8a80;
-    --c1: #5fbf98; --c2: #e8b84a; --c3: #3f8f6e; --c4: #e07a63; --c5: #7fa3d6; --c6: #b3a98f;
-  }
+  color-scheme: light;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--ink);
@@ -194,3 +185,4 @@ details p { margin: 8px 0; }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
 @keyframes fade { from { opacity: 0; } }
 @keyframes slide { from { transform: translateX(-24px); opacity: 0; } }
+.hero-card .delta.flat { background: rgba(255,255,255,.14); color: inherit; font-weight: 500; }
