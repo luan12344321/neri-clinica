@@ -13,7 +13,11 @@ import { getDashboard, getFinanceSummary, getTopProcedures, getRestock, getCashF
 
 const isTest = process.env.NODE_ENV === 'test';
 const DUMMY_HASH = bcrypt.hashSync('dummy-password-for-timing', 10);
-const app = Fastify({ logger: isTest ? false : { redact: ['req.headers.authorization'] } });
+// O app é público em /api/* (Vercel, Netlify, proxy do vite), mas as rotas são registradas na raiz: removemos o prefixo aqui.
+const app = Fastify({
+  logger: isTest ? false : { redact: ['req.headers.authorization'] },
+  rewriteUrl: (req) => req.url.replace(/^\/api(?=\/|\?|$)/, '') || '/',
+});
 // Em produção o app e a API são da mesma origem (/api), então CORS fica desligado, salvo lista explícita.
 await app.register(cors, { origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : false });
 if (!isTest) await app.register(rateLimit, { max: 120, timeWindow: '1 minute' });
