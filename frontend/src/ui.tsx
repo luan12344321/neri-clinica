@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { Component, createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Icon, type IconName } from './Icon';
 
 // ---------- Aviso rápido (toast) ----------
@@ -94,4 +94,45 @@ export function useInstall() {
   const installed = standalone();
   const install = async () => { if (!deferred) return; deferred.prompt(); await deferred.userChoice; deferred = null; notify(); };
   return { installed, canPrompt, ios, install };
+}
+
+// ---------- Ocultar valores (olhinho) ----------
+const HIDE_KEY = 'clinica.hideValues';
+let hidden = (() => { try { return localStorage.getItem(HIDE_KEY) === '1'; } catch { return false; } })();
+const hideSubs = new Set<() => void>();
+export function useHideValues() {
+  const value = useSyncExternalStore((cb) => { hideSubs.add(cb); return () => hideSubs.delete(cb); }, () => hidden);
+  const toggle = () => { hidden = !hidden; try { localStorage.setItem(HIDE_KEY, hidden ? '1' : '0'); } catch { /* storage bloqueado */ } hideSubs.forEach((f) => f()); };
+  return { hidden: value, toggle };
+}
+export const mask = (text: string, hide: boolean) => (hide ? 'R$ ••••••' : text);
+export const EyeToggle = ({ className = '' }: { className?: string }) => {
+  const { hidden, toggle } = useHideValues();
+  return <button className={`eye ${className}`} aria-label={hidden ? 'Mostrar valores' : 'Ocultar valores'} aria-pressed={hidden} onClick={toggle}><Icon name={hidden ? 'eyeoff' : 'eye'} size={20} /></button>;
+};
+
+// ---------- Abas em pílula ----------
+export function Segmented<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: { id: T; label: string }[] }) {
+  return (
+    <div className="seg2" role="tablist">
+      {options.map((o) => <button key={o.id} role="tab" aria-selected={value === o.id} onClick={() => onChange(o.id)}>{o.label}</button>)}
+    </div>
+  );
+}
+
+// Última barreira: se uma tela falhar ao desenhar, mostra um aviso com "Recarregar" em vez de deixar a tela em branco.
+export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(error: unknown) { console.error(error); }
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <div className="crash" role="alert">
+        <b>Algo deu errado nesta tela.</b>
+        <p className="muted">Seus dados estão salvos. Toque para recarregar.</p>
+        <button className="primary" onClick={() => location.reload()}>Recarregar</button>
+      </div>
+    );
+  }
 }

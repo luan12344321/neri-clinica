@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { q } from './db.js';
 import { audit } from './audit.js';
+import { ensureSchema } from './schema.js';
 import { askSara, aiFailure, pingSara } from './sara.js';
 import googleRoutes, { pushAppointment } from './google.js';
 import { getDashboard, getFinanceSummary, getTopProcedures, getRestock, getCashFlow, buildDre } from './queries.js';
@@ -45,6 +46,7 @@ await app.register((await import('./cadastros.js')).default);
 await app.register(googleRoutes);
 await app.register((await import('./team.js')).default);
 await app.register((await import('./presence.js')).default);
+await app.register((await import('./banks.js')).default);
 await app.register((await import('./prontuario.js')).default);
 const clinic = (req) => req.user.clinicId;
 
@@ -190,10 +192,17 @@ app.get('/finance/payables', manager, (req) =>
   q(`SELECT * FROM transactions WHERE clinic_id=$1 AND type='expense' AND status='pending' ORDER BY due_date`, [clinic(req)]));
 app.get('/finance/receivables', manager, (req) =>
   q(`SELECT * FROM transactions WHERE clinic_id=$1 AND type='income' AND status='pending' ORDER BY due_date`, [clinic(req)]));
+// Dá baixa na conta (recebimento ou pagamento) e registra em qual conta bancária o dinheiro entrou/saiu:
+// a escolhida ou, se nenhuma for informada, a padrão da clínica.
 app.post('/finance/transactions/:id/pay', manager, async (req, reply) => {
-  const { id } = req.params;
-  const [row] = await q(`UPDATE transactions SET status='paid', paid_at=now()
-    WHERE id=$1 AND clinic_id=$2 AND status='pending' RETURNING *`, [id, clinic(req)]);
+  await ensureSchema();
+  const { id } = z.object({ id: z.guid() }).parse(req.params);
+  const { bankAccountId } = z.object({ bankAccountId: z.guid().optional() }).parse(req.body ?? {});
+  const [acct] = await q(`SELECT id FROM bank_accounts WHERE clinic_id=$1 AND active AND ($2::uuid IS NULL OR id=$2)
+                         ORDER BY is_default DESC, created_at LIMIT 1`, [clinic(req), bankAccountId ?? null]);
+  if (bankAccountId && !acct) return reply.code(404).send({ error: 'bank account not found' });
+  const [row] = await q(`UPDATE transactions SET status='paid', paid_at=now(), bank_account_id=$3
+    WHERE id=$1 AND clinic_id=$2 AND status='pending' RETURNING *`, [id, clinic(req), acct?.id ?? null]);
   return row ?? reply.code(404).send({ error: 'not found' });
 });
 

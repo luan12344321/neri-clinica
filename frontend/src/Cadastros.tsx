@@ -69,41 +69,127 @@ const Loading = ({ error, ready, rows }: { error: string; ready: boolean; rows?:
 const dateBR = (d: string) => new Date(`${String(d).slice(0, 10)}T12:00`).toLocaleDateString('pt-BR');
 const isBirthday = (d?: string | null) => !!d && String(d).slice(5, 10) === new Date().toISOString().slice(5, 10);
 
-// ---------- Agendar ----------
-export function NewAppointment({ onCreated }: { onCreated: () => void }) {
-  const [open, setOpen] = useState(false);
+// ---------- Agendar e reagendar: dia e horário em chips (horários ocupados e passados ficam desativados) ----------
+const pad = (n: number) => String(n).padStart(2, '0');
+const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const hhmm = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const SLOTS = Array.from({ length: 27 }, (_, i) => `${pad(7 + Math.floor(i / 2))}:${i % 2 ? '30' : '00'}`); // 07:00 às 20:00
+type Slot = { date: string; time: string };
+
+export function SlotPicker({ value, onChange, ignoreId }: { value: Slot; onChange: (v: Slot) => void; ignoreId?: string }) {
+  const days = Array.from({ length: 14 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() + i); return d; });
+  const nextDay = new Date(`${value.date}T12:00`); nextDay.setDate(nextDay.getDate() + 1);
+  const day = useList<any[]>(`/appointments?from=${value.date}&to=${ymd(nextDay)}`);
+  const taken = (time: string) => {
+    const t0 = new Date(`${value.date}T${time}`).getTime();
+    return (day.data ?? []).some((a) => a.id !== ignoreId && a.status !== 'canceled' && t0 >= new Date(a.starts_at).getTime() && t0 < new Date(a.ends_at).getTime());
+  };
+  const past = (time: string) => new Date(`${value.date}T${time}`).getTime() < Date.now();
+  return (
+    <div className="picker">
+      <div className="date-strip" role="listbox" aria-label="Dia">
+        {days.map((d) => (
+          <button key={ymd(d)} role="option" aria-selected={value.date === ymd(d)} onClick={() => onChange({ date: ymd(d), time: '' })}>
+            <i>{d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '')}</i><b>{d.getDate()}</b>
+          </button>
+        ))}
+      </div>
+      <div className="time-grid" role="listbox" aria-label="Horário">
+        {SLOTS.map((time) => {
+          const off = past(time) || taken(time);
+          return <button key={time} role="option" aria-selected={value.time === time} disabled={off} onClick={() => onChange({ ...value, time })}>{time}</button>;
+        })}
+      </div>
+    </div>
+  );
+}
+
+export function AppointmentSheet({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const toast = useToast();
   const patients = useList<any[]>('/patients');
   const procs = useList<any[]>('/procedures');
-  const fields: Field[] = [
-    { name: 'patientId', label: 'Paciente', type: 'select', required: true, options: patients.data?.map((p) => ({ value: p.id, label: p.full_name })) },
-    { name: 'procedureId', label: 'Procedimento', type: 'select', options: procs.data?.map((p) => ({ value: p.id, label: `${p.name} — ${brl(Number(p.default_price))}` })) },
-    { name: 'start', label: 'Início', type: 'datetime-local', required: true },
-  ];
+  const [patientId, setPatientId] = useState('');
+  const [procedureId, setProcedureId] = useState('');
+  const [slot, setSlot] = useState<Slot>({ date: ymd(new Date()), time: '' });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!patientId) return setErr('Escolha o paciente.');
+    if (!slot.time) return setErr('Escolha o horário.');
+    setBusy(true); setErr('');
+    try {
+      const proc = procs.data?.find((p) => p.id === procedureId);
+      const start = new Date(`${slot.date}T${slot.time}`);
+      const end = new Date(start.getTime() + (proc?.duration_min ?? 60) * 60_000);
+      await api('/appointments', { method: 'POST', json: { patientId, procedureId: procedureId || undefined, startsAt: start.toISOString(), endsAt: end.toISOString() } });
+      onCreated(); toast('Agendamento criado');
+    } catch (x) { setErr(errText(x)); } finally { setBusy(false); }
+  }
+  return (
+    <Sheet title="Novo agendamento" onClose={onClose}>
+      <form className="form" onSubmit={submit}>
+        <label>Paciente
+          <select value={patientId} onChange={(e) => setPatientId(e.target.value)} required>
+            <option value="">Selecione…</option>
+            {patients.data?.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+          </select>
+        </label>
+        <label>Procedimento
+          <select value={procedureId} onChange={(e) => setProcedureId(e.target.value)}>
+            <option value="">Sem procedimento</option>
+            {procs.data?.map((p) => <option key={p.id} value={p.id}>{p.name} — {brl(Number(p.default_price))}</option>)}
+          </select>
+        </label>
+        <div className="form-label">Dia e horário<SlotPicker value={slot} onChange={setSlot} /></div>
+        {err && <p role="alert" className="err">{err}</p>}
+        <button className="primary" disabled={busy}>{busy ? 'Salvando…' : 'Agendar'}</button>
+      </form>
+    </Sheet>
+  );
+}
+
+export function RescheduleSheet({ appt, onClose, onDone }: { appt: any; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [slot, setSlot] = useState<Slot>({ date: ymd(new Date(appt.starts_at)), time: '' });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  async function go() {
+    if (!slot.time) return setErr('Escolha o novo horário.');
+    setBusy(true); setErr('');
+    try {
+      const minutes = appt.ends_at ? Math.max(15, Math.round((new Date(appt.ends_at).getTime() - new Date(appt.starts_at).getTime()) / 60_000)) : 60;
+      const start = new Date(`${slot.date}T${slot.time}`);
+      await api(`/appointments/${appt.id}`, { method: 'PATCH', json: { startsAt: start.toISOString(), endsAt: new Date(start.getTime() + minutes * 60_000).toISOString() } });
+      onDone(); toast('Atendimento reagendado');
+    } catch (x) { setErr(errText(x)); } finally { setBusy(false); }
+  }
+  return (
+    <Sheet title="Reagendar" onClose={onClose}>
+      <p className="muted"><b>{appt.patient}</b> · {appt.procedure ?? 'Sem procedimento'} · hoje às {hhmm(new Date(appt.starts_at))}</p>
+      <SlotPicker value={slot} onChange={setSlot} ignoreId={appt.id} />
+      {err && <p role="alert" className="err">{err}</p>}
+      <button className="primary" disabled={busy} onClick={go}>{busy ? 'Salvando…' : 'Confirmar novo horário'}</button>
+    </Sheet>
+  );
+}
+
+export function NewAppointment({ onCreated }: { onCreated: () => void }) {
+  const [open, setOpen] = useState(false);
   return (
     <>
       <button className="primary sm" onClick={() => setOpen(true)}><Icon name="plus" size={16} />Agendar</button>
-      {open && (
-        <Sheet title="Novo agendamento" onClose={() => setOpen(false)}>
-          <AddForm fields={fields} label="Agendar" onSubmit={async (v) => {
-            const proc = procs.data?.find((p) => p.id === v.procedureId);
-            const start = new Date(String(v.start));
-            const end = new Date(start.getTime() + (proc?.duration_min ?? 60) * 60_000);
-            await api('/appointments', { method: 'POST', json: { patientId: v.patientId, procedureId: v.procedureId, startsAt: start.toISOString(), endsAt: end.toISOString() } });
-            setOpen(false); onCreated(); toast('Agendamento criado');
-          }} />
-        </Sheet>
-      )}
+      {open && <AppointmentSheet onClose={() => setOpen(false)} onCreated={() => { setOpen(false); onCreated(); }} />}
     </>
   );
 }
 
 // ---------- Seções do menu ----------
 export type Section = 'pacientes' | 'procedimentos' | 'estoque' | 'mensagens';
-export function Cadastros({ section }: { section: Section }) {
+export function Cadastros({ section, autoOpen = false }: { section: Section; autoOpen?: boolean }) {
   return (
     <>
-      {section === 'pacientes' && <Patients />}
+      {section === 'pacientes' && <Patients autoOpen={autoOpen} />}
       {section === 'procedimentos' && <Procedures />}
       {section === 'estoque' && <Products />}
       {section === 'mensagens' && <Messages />}
@@ -111,13 +197,13 @@ export function Cadastros({ section }: { section: Section }) {
   );
 }
 
-function Patients() {
+function Patients({ autoOpen = false }: { autoOpen?: boolean }) {
   const [search, setSearch] = useState('');
   const [term, setTerm] = useState('');
   useEffect(() => { const t = setTimeout(() => setTerm(search.trim()), 250); return () => clearTimeout(t); }, [search]);
   const l = useList<any[]>(`/patients?search=${encodeURIComponent(term)}`);
   const [open, setOpen] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState(autoOpen);
   const toast = useToast();
   if (open) return <PatientDetail id={open} onClose={() => setOpen(null)} />;
   return (

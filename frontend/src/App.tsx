@@ -3,10 +3,12 @@ import { useLoad } from './hooks';
 import { Area, AreaChart, Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { ApiError, api, brl, getToken, lastMonths, monthLabel, setToken, thisMonth } from './api';
 import { Icon, type IconName } from './Icon';
-import { Cadastros, NewAppointment, type Section } from './Cadastros';
-import { Empty, ListSkeleton, RoleProvider, ToastProvider, useInstall, useRole } from './ui';
+import { AppointmentSheet, Cadastros, NewAppointment, RescheduleSheet, type Section } from './Cadastros';
+import { Avatar, Empty, ErrorBoundary, EyeToggle, ListSkeleton, RoleProvider, ToastProvider, mask, useHideValues, useInstall, useRole } from './ui';
 import { Settings, type Me } from './Settings';
 import { PresenceButton } from './Presence';
+import { Finance, RecentTransactions, type Bank, type FinTab } from './Finance';
+import { BottomNav, QuickSheet, Splash, type QuickAction } from './Chrome';
 
 type View = 'inicio' | 'agenda' | 'financeiro' | 'estoque' | 'sara' | 'pacientes' | 'procedimentos' | 'produtos' | 'mensagens' | 'config';
 
@@ -37,8 +39,8 @@ const pct = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 1 
 
 export default function App() {
   const [authed, setAuthed] = useState(!!getToken());
-  if (!authed) return <Login onDone={() => setAuthed(true)} />;
-  return <ToastProvider><Shell onLogout={() => { setToken(null); setAuthed(false); }} /></ToastProvider>;
+  if (!authed) return <ErrorBoundary><Splash /><Login onDone={() => setAuthed(true)} /></ErrorBoundary>;
+  return <ErrorBoundary><ToastProvider><Splash /><Shell onLogout={() => { setToken(null); setAuthed(false); }} /></ToastProvider></ErrorBoundary>;
 }
 
 function Shell({ onLogout }: { onLogout: () => void }) {
@@ -71,7 +73,20 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
     return () => removeEventListener('keydown', onKey);
   }, [open]);
 
-  const go = (v: View) => { setView(v); setOpen(false); scrollTo({ top: 0 }); };
+  const [finTab, setFinTab] = useState<FinTab>('resumo');
+  const [autoPatient, setAutoPatient] = useState(false);
+  const [quick, setQuick] = useState(false);
+  const [booking, setBooking] = useState(false);
+  const [fresh, setFresh] = useState(0); // muda quando algo é criado, para as telas recarregarem
+  const go = (v: View, tab?: FinTab) => { if (tab) setFinTab(tab); setAutoPatient(false); setView(v); setOpen(false); scrollTo({ top: 0 }); };
+  const quickActions: QuickAction[] = [
+    { icon: 'calendar', title: 'Agendar atendimento', hint: 'Escolha o dia e o horário', run: () => setBooking(true) },
+    { icon: 'users', title: 'Cadastrar paciente', hint: 'Novo cadastro', run: () => { go('pacientes'); setAutoPatient(true); } },
+    ...(isManager ? [
+      { icon: 'receive' as const, title: 'Nova conta a receber ou pagar', hint: 'Lançar no financeiro', run: () => go('financeiro', 'contas') },
+      { icon: 'bank' as const, title: 'Adicionar banco', hint: 'Onde o dinheiro cai', run: () => go('financeiro', 'bancos') },
+    ] : []),
+  ];
   const nAlerts = restock.data?.length ?? 0;
 
   return (
@@ -89,19 +104,19 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
       </header>
 
       <main>
-        {view === 'inicio' && <Today name={me?.name} restock={restock.data ?? []} go={go} money={isManager} />}
+        {view === 'inicio' && <Today key={fresh} name={me?.name} restock={restock.data ?? []} go={go} money={isManager} onBook={() => setBooking(true)} />}
         {view === 'config' && <Settings me={me} />}
-        {view === 'agenda' && <Agenda />}
-        {view === 'financeiro' && <Finance />}
+        {view === 'agenda' && <Agenda key={fresh} />}
+        {view === 'financeiro' && <Finance initialTab={finTab} onTab={setFinTab} />}
         {view === 'estoque' && <Stock go={go} />}
         {view === 'sara' && <Julia name={me?.name} />}
-        {(view === 'pacientes' || view === 'procedimentos' || view === 'mensagens') && <Cadastros section={view} />}
+        {(view === 'pacientes' || view === 'procedimentos' || view === 'mensagens') && <Cadastros section={view} autoOpen={autoPatient} />}
         {view === 'produtos' && <Cadastros section={'estoque' satisfies Section} />}
       </main>
 
-      {view !== 'sara' && isManager && (
-        <button className="fab" aria-label="Falar com a Julia" onClick={() => go('sara')}><Icon name="spark" size={26} /></button>
-      )}
+      {view !== 'sara' && <BottomNav view={view} isManager={isManager} go={go} onQuick={() => setQuick(true)} onMenu={() => setOpen(true)} />}
+      {quick && <QuickSheet actions={quickActions} onClose={() => setQuick(false)} />}
+      {booking && <AppointmentSheet onClose={() => setBooking(false)} onCreated={() => { setBooking(false); setFresh((n) => n + 1); }} />}
 
       {/* Celular: gaveta que abre sobre o conteúdo. Desktop (CSS): barra lateral fixa, sempre visível. */}
       <div className={`drawer-wrap${open ? ' open' : ''}`}>
@@ -137,6 +152,7 @@ function Login({ onDone }: { onDone: () => void }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [show, setShow] = useState(false);
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true); setError('');
     try { const r = await api<{ token: string }>('/auth/login', { method: 'POST', json: { email, password } }); setToken(r.token); onDone(); }
@@ -146,14 +162,15 @@ function Login({ onDone }: { onDone: () => void }) {
   return (
     <div className="login-page">
       <aside className="login-brand" aria-hidden="true"><span className="logo"><svg viewBox="0 0 24 24" width="30" height="30"><path d="M12 5v14M5 12h14" /></svg></span><h2>Gestão da clínica na palma da mão</h2><p>Agenda, financeiro, estoque e a Julia, sua assistente, em um só lugar.</p></aside>
-    <form className="login" onSubmit={submit}>
+    <form className="login" aria-label="Entrar" onSubmit={submit}>
       <span className="logo" aria-hidden="true"><svg viewBox="0 0 24 24" width="30" height="30"><path d="M12 5v14M5 12h14" /></svg></span>
       <h1>Clínica</h1>
       <p className="muted">Gestão na palma da mão.</p>
       <label>E-mail<input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
-      <label>Senha<input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
+      <label>Senha<span className="pw"><input type={show ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /><button type="button" aria-label={show ? 'Ocultar senha' : 'Mostrar senha'} onClick={() => setShow((s) => !s)}><Icon name={show ? 'eyeoff' : 'eye'} size={20} /></button></span></label>
       {error && <p role="alert" className="err">{error}</p>}
       <button className="primary" disabled={busy}>{busy ? 'Entrando…' : 'Entrar'}</button>
+      <p className="login-hint">Esqueceu a senha? Peça ao proprietário para redefinir em Configurações → Equipe.</p>
     </form>
     </div>
   );
@@ -166,7 +183,7 @@ const Delta = ({ value }: { value: number | null }) =>
   value === null ? null : <span className={`delta${value < 0 ? ' down' : ''}`}>{value < 0 ? '▼' : '▲'} {pct(Math.abs(value))}% <i>vs mês anterior</i></span>;
 
 // Convite para instalar o app (só aparece quando o navegador permite instalar, ou no iPhone).
-function InstallBanner({ go }: { go: (v: View) => void }) {
+function InstallBanner({ go }: { go: (v: View, tab?: FinTab) => void }) {
   const { installed, canPrompt, ios, install } = useInstall();
   const [hidden, setHidden] = useState(() => { try { return localStorage.getItem('clinica.installHidden') === '1'; } catch { return false; } });
   if (installed || hidden || !(canPrompt || ios)) return null;
@@ -182,19 +199,26 @@ function InstallBanner({ go }: { go: (v: View) => void }) {
 }
 
 // ---------- Início ----------
-function Today({ name, restock, go, money }: { name?: string; restock: any[]; go: (v: View) => void; money: boolean }) {
+function Today({ name, restock, go, money, onBook }: { name?: string; restock: any[]; go: (v: View, tab?: FinTab) => void; money: boolean; onBook: () => void }) {
   const dash = useLoad<any>('/dashboard');
   const sum = useLoad<any>(money ? `/finance/summary?month=${thisMonth()}` : null);
   const recv = useLoad<any[]>(money ? '/finance/receivables' : null);
+  const banks = useLoad<Bank[]>(money ? '/banks' : null);
   const [busyId, setBusyId] = useState('');
+  const [bump, setBump] = useState(0);
+  const [moving, setMoving] = useState<any | null>(null);
+  const { hidden } = useHideValues();
 
   async function complete(id: string) {
     setBusyId(id);
-    try { await api(`/appointments/${id}/complete`, { method: 'POST', json: {} }); dash.reload(); sum.reload(); recv.reload(); }
+    try { await api(`/appointments/${id}/complete`, { method: 'POST', json: {} }); dash.reload(); sum.reload(); recv.reload(); banks.reload(); setBump((b) => b + 1); }
     finally { setBusyId(''); }
   }
   const d = dash.data, s = sum.data;
   const toReceive = (recv.data ?? []).reduce((a, t) => a + Number(t.amount), 0);
+  const overdue = (recv.data ?? []).filter((t) => String(t.due_date).slice(0, 10) < new Date().toISOString().slice(0, 10));
+  const activeBanks = (banks.data ?? []).filter((b) => b.active);
+  const balance = activeBanks.reduce((a, b) => a + b.balance, 0);
   // Sempre 6 meses (zero onde não há receita): o gráfico mantém forma e a variação tem com o que comparar.
   const byMonth = Object.fromEntries((d?.revenueByMonth ?? []).map((r: any) => [r.month, r.revenue]));
   const series = lastMonths(6).map((month) => ({ month, m: monthLabel(month), revenue: byMonth[month] ?? 0 }));
@@ -203,6 +227,19 @@ function Today({ name, restock, go, money }: { name?: string; restock: any[]; go
   const procTotal = (d?.topProcedures ?? []).reduce((a: number, p: any) => a + p.total, 0);
   const first = name?.split(/\s+/)[0];
   const doneToday = d ? d.today.filter((a: any) => a.status === 'done').length : 0;
+  const next = d ? d.today.find((a: any) => a.status !== 'done' && a.status !== 'canceled') : null;
+  const timeOf = (a: any) => new Date(a.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const tip = !money ? null : overdue.length
+    ? { icon: 'alert' as IconName, text: `${overdue.length} recebimento(s) vencido(s) somam ${mask(brl(overdue.reduce((a, t) => a + Number(t.amount), 0)), hidden)}.`, cta: 'Ver contas', run: () => go('financeiro', 'contas') }
+    : delta !== null && delta !== 0
+      ? { icon: 'pulse' as IconName, text: `Faturamento ${pct(Math.abs(delta))}% ${delta > 0 ? 'acima' : 'abaixo'} do mês anterior.`, cta: 'Ver resumo', run: () => go('financeiro', 'resumo') }
+      : null;
+  const quick: { icon: IconName; label: string; run: () => void }[] = [
+    { icon: 'calendar', label: 'Agendar', run: onBook },
+    { icon: 'users', label: 'Pacientes', run: () => go('pacientes') },
+    ...(money ? [{ icon: 'receive' as IconName, label: 'Receber', run: () => go('financeiro', 'contas') }, { icon: 'bank' as IconName, label: 'Bancos', run: () => go('financeiro', 'bancos') }]
+      : [{ icon: 'box' as IconName, label: 'Estoque', run: () => go('estoque') }, { icon: 'calendar' as IconName, label: 'Agenda', run: () => go('agenda') }]),
+  ];
 
   return (
     <div className="dash">
@@ -215,31 +252,62 @@ function Today({ name, restock, go, money }: { name?: string; restock: any[]; go
       {d && (!money || s) && (
         <>
           {money && s && (
-          <section className="hero-card span-all">
-            <div className="hero-main">
-              <span>Faturamento do mês</span>
-              <strong>{brl(s.income)}</strong>
-              {delta === null ? <span className="delta flat">Primeiro mês</span> : <Delta value={delta} />}
-            </div>
-            <div className="spark" aria-hidden="true">
-              <ResponsiveContainer width="100%" height={56}>
-                <AreaChart data={series} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
-                  <defs><linearGradient id="g-hero" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" style={{ stopColor: 'var(--yellow)', stopOpacity: 0.35 }} /><stop offset="100%" style={{ stopColor: 'var(--yellow)', stopOpacity: 0 }} />
-                  </linearGradient></defs>
-                  <Area type="monotone" dataKey="revenue" stroke="var(--yellow)" strokeWidth={2} fill="url(#g-hero)" isAnimationActive={false} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </section>)}
+            <section className="hero-card span-all">
+              <div className="hero-main">
+                <span>Faturamento do mês<EyeToggle className="on-dark inline" /></span>
+                <strong>{mask(brl(s.income), hidden)}</strong>
+                {delta === null ? <span className="delta flat">Primeiro mês</span> : <Delta value={delta} />}
+                {activeBanks.length > 0 && <button className="hero-balance" onClick={() => go('financeiro', 'bancos')}><Icon name="bank" size={16} />Saldo em contas <b>{mask(brl(balance), hidden)}</b></button>}
+              </div>
+              <div className="spark" aria-hidden="true">
+                <ResponsiveContainer width="100%" height={56}>
+                  <AreaChart data={series} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
+                    <defs><linearGradient id="g-hero" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" style={{ stopColor: 'var(--yellow)', stopOpacity: 0.35 }} /><stop offset="100%" style={{ stopColor: 'var(--yellow)', stopOpacity: 0 }} />
+                    </linearGradient></defs>
+                    <Area type="monotone" dataKey="revenue" stroke="var(--yellow)" strokeWidth={2} fill="url(#g-hero)" isAnimationActive={false} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </section>
+          )}
+
+          <section className="quick-actions span-all" aria-label="Ações rápidas">
+            {quick.map((q) => <button key={q.label} onClick={q.run}><span><Icon name={q.icon} size={22} /></span>{q.label}</button>)}
+          </section>
+
+          <section className="next-card span-all">
+            <span className="next-label">Próximo atendimento</span>
+            {next ? (
+              <>
+                <div className="next-main">
+                  <Avatar name={next.patient} size={46} />
+                  <div className="grow"><b>{next.patient}</b><span>{next.procedure ?? 'Sem procedimento'}</span></div>
+                  <span className="next-time"><Icon name="calendar" size={16} />{timeOf(next)}</span>
+                </div>
+                <div className="next-actions">
+                  <button className="ghost" onClick={() => setMoving(next)}>Reagendar</button>
+                  <button className="primary" disabled={busyId === next.id} onClick={() => complete(next.id)}>Concluir</button>
+                </div>
+              </>
+            ) : <p className="next-empty">{d.today.length ? 'Todos os atendimentos de hoje foram concluídos.' : 'Nenhum atendimento para hoje.'}</p>}
+          </section>
+
+          {tip && (
+            <section className="card tip span-all">
+              <span className="q-ico"><Icon name={tip.icon} size={20} /></span>
+              <div className="grow"><b>{tip.text}</b></div>
+              <button className="link" onClick={tip.run}>{tip.cta}</button>
+            </section>
+          )}
 
           <section className="kpis span-all">
             <button className="kpi" onClick={() => go('agenda')}><Icon name="calendar" size={18} /><span>Atendimentos hoje</span><strong>{d.today.length}</strong><small>{doneToday} concluído(s)</small></button>
             {money && s && (<>
-            <button className="kpi" onClick={() => go('financeiro')}><Icon name="syringe" size={18} /><span>Procedimentos no mês</span><strong>{s.proceduresDone}</strong></button>
-            <button className="kpi" onClick={() => go('financeiro')}><Icon name="wallet" size={18} /><span>Ticket médio</span><strong>{brl(s.averageTicket)}</strong></button>
-            <button className="kpi" onClick={() => go('financeiro')}><Icon name="receive" size={18} /><span>A receber</span><strong>{brl(toReceive)}</strong><small>{recv.data?.length ?? 0} pendente(s) de pagamento</small></button>
-          </>)}
+              <button className="kpi" onClick={() => go('financeiro')}><Icon name="syringe" size={18} /><span>Procedimentos no mês</span><strong>{s.proceduresDone}</strong></button>
+              <button className="kpi" onClick={() => go('financeiro')}><Icon name="wallet" size={18} /><span>Ticket médio</span><strong>{mask(brl(s.averageTicket), hidden)}</strong></button>
+              <button className="kpi" onClick={() => go('financeiro', 'contas')}><Icon name="receive" size={18} /><span>A receber</span><strong>{mask(brl(toReceive), hidden)}</strong><small>{recv.data?.length ?? 0} pendente(s) de pagamento</small></button>
+            </>)}
           </section>
 
           {restock.length > 0 && (
@@ -254,13 +322,13 @@ function Today({ name, restock, go, money }: { name?: string; restock: any[]; go
           )}
 
           <section className="card">
-            <div className="between"><h2>Agenda de hoje</h2><NewAppointment onCreated={dash.reload} /></div>
-            {d.today.length === 0 ? <p className="muted">Nenhum atendimento hoje.</p> : (
+            <div className="between"><h2>Agenda de hoje</h2><button className="link" onClick={() => go('agenda')}>Ver agenda completa</button></div>
+            {d.today.length === 0 ? <Empty icon="calendar" title="Dia livre" text="Nenhum atendimento hoje.">{<button className="primary sm" onClick={onBook}>Agendar</button>}</Empty> : (
               <ul className="rows">
                 {d.today.map((a: any) => (
                   <li key={a.id}>
                     <div>
-                      <b>{new Date(a.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</b>{' '}{a.patient}
+                      <b>{timeOf(a)}</b>{' '}{a.patient}
                       <div className="muted">{a.procedure ?? 'Sem procedimento'}</div>
                     </div>
                     {a.status === 'done' ? <span className="pill ok">Concluído</span>
@@ -269,28 +337,29 @@ function Today({ name, restock, go, money }: { name?: string; restock: any[]; go
                 ))}
               </ul>
             )}
-            <button className="link" style={{ marginTop: 12 }} onClick={() => go('agenda')}>Ver agenda completa</button>
           </section>
 
+          {money && <RecentTransactions limit={5} reloadKey={bump} onSeeAll={() => go('financeiro', 'contas')} />}
+
           {money && (
-          <section className="card">
-            <div className="between"><h2>Faturamento mensal</h2><Delta value={delta} /></div>
-            <div className="chart" role="img" aria-label="Gráfico de área do faturamento dos últimos 6 meses">
-              <ResponsiveContainer width="100%" height={200}>
-                <AreaChart data={series} margin={{ top: 8, right: 8, left: -14, bottom: 0 }}>
-                  <defs><linearGradient id="g-rev" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" style={{ stopColor: 'var(--accent)', stopOpacity: 0.28 }} /><stop offset="100%" style={{ stopColor: 'var(--accent)', stopOpacity: 0 }} />
-                  </linearGradient></defs>
-                  <CartesianGrid vertical={false} stroke="var(--line)" />
-                  <XAxis dataKey="m" tickLine={false} axisLine={false} tick={{ fill: 'var(--muted)', fontSize: 12 }} />
-                  <YAxis tickLine={false} axisLine={false} width={44} tick={{ fill: 'var(--muted)', fontSize: 12 }} tickFormatter={(v) => (v >= 1000 ? `${v / 1000}k` : v)} />
-                  <Tooltip formatter={(v: number) => [brl(v), 'Receita']}
-                    contentStyle={{ background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--ink)' }} />
-                  <Area type="monotone" dataKey="revenue" stroke="var(--accent)" strokeWidth={2.5} fill="url(#g-rev)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </section>
+            <section className="card">
+              <div className="between"><h2>Faturamento mensal</h2><Delta value={delta} /></div>
+              <div className="chart" role="img" aria-label="Gráfico de área do faturamento dos últimos 6 meses">
+                <ResponsiveContainer width="100%" height={200}>
+                  <AreaChart data={series} margin={{ top: 8, right: 8, left: -14, bottom: 0 }}>
+                    <defs><linearGradient id="g-rev" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" style={{ stopColor: 'var(--accent)', stopOpacity: 0.28 }} /><stop offset="100%" style={{ stopColor: 'var(--accent)', stopOpacity: 0 }} />
+                    </linearGradient></defs>
+                    <CartesianGrid vertical={false} stroke="var(--line)" />
+                    <XAxis dataKey="m" tickLine={false} axisLine={false} tick={{ fill: 'var(--muted)', fontSize: 12 }} />
+                    <YAxis tickLine={false} axisLine={false} width={44} tick={{ fill: 'var(--muted)', fontSize: 12 }} tickFormatter={(v) => (v >= 1000 ? `${v / 1000}k` : v)} />
+                    <Tooltip formatter={(v: number) => [hidden ? '••••' : brl(v), 'Receita']}
+                      contentStyle={{ background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--ink)' }} />
+                    <Area type="monotone" dataKey="revenue" stroke="var(--accent)" strokeWidth={2.5} fill="url(#g-rev)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </section>
           )}
 
           <section className="card">
@@ -318,6 +387,7 @@ function Today({ name, restock, go, money }: { name?: string; restock: any[]; go
           <GoogleCard />
         </>
       )}
+      {moving && <RescheduleSheet appt={moving} onClose={() => setMoving(null)} onDone={() => { setMoving(null); dash.reload(); }} />}
     </div>
   );
 }
@@ -391,116 +461,8 @@ function GoogleCard() {
   );
 }
 
-// ---------- Financeiro ----------
-function Finance() {
-  const [month, setMonth] = useState(thisMonth());
-  const sum = useLoad<any>(`/finance/summary?month=${month}`);
-  const dre = useLoad<any>(`/finance/dre?month=${month}`);
-  const pay = useLoad<any[]>('/finance/payables');
-  const recv = useLoad<any[]>('/finance/receivables');
-  const flow = useLoad<{ month: string; income: number; expense: number }[]>('/finance/cashflow');
-
-  async function settle(id: string) {
-    await api(`/finance/transactions/${id}/pay`, { method: 'POST', json: {} });
-    pay.reload(); recv.reload(); sum.reload(); flow.reload();
-  }
-  const s = sum.data, r = dre.data;
-  const total = (items: any[] | null) => (items ?? []).reduce((a, t) => a + Number(t.amount), 0);
-  const today = new Date().toISOString().slice(0, 10);
-  const overdue = (recv.data ?? []).filter((t) => String(t.due_date).slice(0, 10) < today);
-  const line = (label: string, v: number, strong = false) => (
-    <tr className={strong ? 'strong' : ''}><td>{label}</td><td className={v < 0 ? 'neg' : ''}>{brl(v)}</td></tr>
-  );
-  const list = (title: string, items: any[] | null, cta: string) => (
-    <section className="card">
-      <h2>{title}</h2>
-      {!items?.length ? <Empty icon="check" title="Nada pendente" /> : (
-        <ul className="rows">
-          {items.map((t) => (
-            <li key={t.id}>
-              <div>{t.description}<div className="muted">vence {new Date(`${String(t.due_date).slice(0, 10)}T12:00`).toLocaleDateString('pt-BR')}</div></div>
-              <div className="right"><b>{brl(Number(t.amount))}</b><button className="ghost sm" onClick={() => settle(t.id)}>{cta}</button></div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-  const quick = (icon: IconName, label: string, hint: string, value: number, tone = '') => (
-    <li><span className={`q-ico ${tone}`}><Icon name={icon} size={20} /></span><div><b>{label}</b><div className="muted">{hint}</div></div><strong className={tone === 'bad' ? 'neg' : ''}>{brl(value)}</strong></li>
-  );
-
-  return (
-    <div className="dash">
-      <div className="toolbar span-all">
-        <label>Mês<input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} /></label>
-      </div>
-      <div className="span-all"><Status error={sum.error || dre.error} loading={!s || !r} /></div>
-      {s && r && (
-        <>
-          <section className="fin-cards span-all">
-            <div className="fin"><span><Icon name="receive" size={16} />Receitas</span><strong>{brl(s.income)}</strong></div>
-            <div className="fin"><span><Icon name="pay" size={16} />Despesas</span><strong>{brl(s.expense)}</strong></div>
-            <div className="fin result"><span><Icon name="wallet" size={16} />Resultado do mês</span><strong className={s.balance < 0 ? 'neg' : ''}>{brl(s.balance)}</strong><small>Ticket médio {brl(s.averageTicket)}</small></div>
-          </section>
-          <section className="card">
-            <h2>Resumo rápido</h2>
-            <ul className="quick">
-              {quick('receive', 'Contas a receber', `${recv.data?.length ?? 0} pendente(s)`, total(recv.data))}
-              {quick('pay', 'Contas a pagar', `${pay.data?.length ?? 0} pendente(s)`, total(pay.data))}
-              {quick('alert', 'Inadimplência', `${overdue.length} vencido(s)`, total(overdue), overdue.length ? 'bad' : '')}
-            </ul>
-          </section>
-          <section className="card">
-            <div className="between"><h2>Fluxo de caixa</h2><span className="muted">últimos 6 meses · pagos e recebidos</span></div>
-            <Status error={flow.error} loading={!flow.data} />
-            {flow.data && (
-              <>
-                <div className="chart" role="img" aria-label="Gráfico de barras com entradas e saídas de caixa por mês">
-                  <ResponsiveContainer width="100%" height={210}>
-                    <BarChart data={flow.data.map((f) => ({ ...f, m: monthLabel(f.month) }))} margin={{ top: 8, right: 8, left: -14, bottom: 0 }} barGap={4}>
-                      <CartesianGrid vertical={false} stroke="var(--line)" />
-                      <XAxis dataKey="m" tickLine={false} axisLine={false} tick={{ fill: 'var(--muted)', fontSize: 12 }} />
-                      <YAxis tickLine={false} axisLine={false} width={44} tick={{ fill: 'var(--muted)', fontSize: 12 }} tickFormatter={(v) => (v >= 1000 ? `${v / 1000}k` : v)} />
-                      <Tooltip cursor={{ fill: 'var(--line)', opacity: 0.4 }} formatter={(v: number, n: string) => [brl(v), n === 'income' ? 'Entradas' : 'Saídas']}
-                        contentStyle={{ background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--ink)' }} />
-                      <Bar dataKey="income" fill="var(--c1)" radius={[5, 5, 0, 0]} maxBarSize={22} />
-                      <Bar dataKey="expense" fill="var(--c4)" radius={[5, 5, 0, 0]} maxBarSize={22} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-                <ul className="legend inline">
-                  <li><i style={{ background: 'var(--c1)' }} /><span>Entradas</span><b>{brl(flow.data.reduce((a, f) => a + f.income, 0))}</b></li>
-                  <li><i style={{ background: 'var(--c4)' }} /><span>Saídas</span><b>{brl(flow.data.reduce((a, f) => a + f.expense, 0))}</b></li>
-                </ul>
-              </>
-            )}
-          </section>
-          <section className="card">
-            <h2>DRE</h2>
-            <table className="dre"><tbody>
-              {line('Receita bruta', r.receitaBruta)}
-              {line('(−) Deduções', -r.deducoes)}
-              {line('Receita líquida', r.receitaLiquida, true)}
-              {line('(−) Custos variáveis', -r.custosVariaveis)}
-              {line('Lucro bruto', r.lucroBruto, true)}
-              {line('(−) Despesas operacionais', -r.despesasOperacionais)}
-              {line('Resultado operacional', r.resultadoOperacional, true)}
-              {line('(−) Despesas financeiras', -r.despesasFinanceiras)}
-              {line('(−) Impostos sobre o lucro', -r.impostosLucro)}
-              {line('Lucro líquido', r.lucroLiquido, true)}
-            </tbody></table>
-          </section>
-        </>
-      )}
-      {list('A receber', recv.data, 'Receber')}
-      {list('A pagar', pay.data, 'Pagar')}
-    </div>
-  );
-}
-
 // ---------- Estoque ----------
-function Stock({ go }: { go: (v: View) => void }) {
+function Stock({ go }: { go: (v: View, tab?: FinTab) => void }) {
   const { isManager } = useRole();
   const restock = useLoad<any[]>('/stock/restock');
   const protocols = useLoad<any[]>('/protocols');

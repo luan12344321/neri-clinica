@@ -3,7 +3,7 @@ import { q } from './db.js';
 
 export async function getDashboard(clinicId) {
   const [today, revenue, top] = await Promise.all([
-    q(`SELECT a.id, a.starts_at, a.status, p.full_name AS patient, pr.name AS procedure
+    q(`SELECT a.id, a.starts_at, a.ends_at, a.status, p.full_name AS patient, pr.name AS procedure
        FROM appointments a JOIN patients p ON p.id=a.patient_id
        LEFT JOIN procedures pr ON pr.id=a.procedure_id
        JOIN clinics c ON c.id=a.clinic_id

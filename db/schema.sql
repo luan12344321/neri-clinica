@@ -93,7 +93,16 @@ CREATE TABLE bank_accounts (
   clinic_id uuid NOT NULL REFERENCES clinics ON DELETE CASCADE,
   name text NOT NULL,
   provider text,                             -- ex.: pluggy/belvo
-  provider_item_id text
+  provider_item_id text,
+  institution text NOT NULL DEFAULT 'Outro',
+  kind text NOT NULL DEFAULT 'checking' CHECK (kind IN ('checking','savings','payment','cash')),
+  last4 text,                                -- só os 4 últimos dígitos; nunca o número completo
+  pix_key_enc text,                          -- chave Pix cifrada (AES-GCM) na aplicação
+  pix_key_type text CHECK (pix_key_type IN ('cpf','cnpj','email','phone','random')),
+  opening_balance numeric(14,2) NOT NULL DEFAULT 0,
+  is_default boolean NOT NULL DEFAULT false,
+  active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now()
 );
 
 -- Contas a receber/pagar + fluxo de caixa (uma tabela, status distingue)
