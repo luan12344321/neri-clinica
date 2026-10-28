@@ -71,7 +71,7 @@ export function DayTimeline({ appts, hours, onOpen, onBook, onSeeAll }: { appts:
         <div className="tl" style={{ height: total + 8 }}>
           {segs.slice(1).map((sg, i) => <div key={sg.s} className="tl-gap" style={{ top: segs[i]!.top + len(segs[i]!.s, segs[i]!.e), height: GAP }}><span>Intervalo · {fromMin(segs[i]!.e)} às {fromMin(sg.s)}</span></div>)}
           {ticks.map(({ m, top }) => <div key={`${m}-${top}`} className="tl-hour" style={{ top }}><span>{fromMin(m)}</span></div>)}
-          {nowSeg && <div className="tl-now" style={{ top: nowSeg.top + len(nowSeg.s, nowMin) }}><i>{clock(now)}</i></div>}
+          {nowSeg && <div className="tl-now" style={{ top: nowSeg.top + len(nowSeg.s, nowMin) }}><i>Agora {clock(now)}</i></div>}
           {placed.map(({ a, s, e, seg, lane }) => {
             const done = a.status === 'done';
             const late = !done && e < nowMin;
@@ -80,7 +80,7 @@ export function DayTimeline({ appts, hours, onOpen, onBook, onSeeAll }: { appts:
             return (
               <button key={a.id} className={`tl-item${done ? ' done' : ''}${late ? ' late' : ''}`} onClick={() => onOpen(a)}
                 style={{ top: seg.top + len(seg.s, cs) + 1, height: bh, left: `calc(52px + (100% - 52px) * ${lane / nLanes})`, width: `calc((100% - 52px) / ${nLanes} - 4px)` }}>
-                <b>{clock(new Date(a.starts_at))} · {a.patient}</b>
+                <b>{clock(new Date(a.starts_at))}{a.ends_at ? `–${clock(new Date(a.ends_at))}` : ''} · {a.patient}</b>
                 {bh >= 44 && <span>{a.procedure ?? 'Sem procedimento'}{late ? ' · atrasado' : ''}</span>}
                 {done && <em aria-label="Concluído"><Icon name="check" size={14} /></em>}
               </button>
@@ -118,24 +118,35 @@ export function ApptSheet({ appt, clinical, busy, onClose, onStart, onChart, onC
   );
 }
 
-// Faixa do dia: pílula verde com os atendimentos de hoje como pontos sobre as horas (07h–20h) e a marca do "agora".
+// Fila do dia: um cartão por atendimento, em ordem de horário (sem sobreposição). O próximo fica destacado,
+// concluídos esmaecidos com check e atrasados em terracota. Toque abre o atendimento.
 export function DayStrip({ appts, onOpen }: { appts: Appt[]; onOpen: (a: Appt) => void }) {
-  const list = appts.filter((a) => a.status !== 'canceled');
+  const list = appts.filter((a) => a.status !== 'canceled').sort((x, y) => x.starts_at.localeCompare(y.starts_at));
   if (!list.length) return null;
-  const T0 = 7 * 60, T1 = 20 * 60;
-  const at = (m: number) => `${Math.min(100, Math.max(0, ((m - T0) / (T1 - T0)) * 100))}%`;
-  const now = mins(new Date());
+  const nowMin = mins(new Date());
+  const endMin = (a: Appt) => mins(new Date(a.ends_at ?? a.starts_at));
+  const nextId = list.find((a) => a.status !== 'done' && endMin(a) >= nowMin)?.id;
+  const open = list.filter((a) => a.status !== 'done').length;
   return (
-    <section className="day-strip" aria-label="Linha do dia">
-      <span className="ds-title">Hoje</span>
-      <div className="ds-track">
-        {[8, 10, 12, 14, 16, 18].map((h) => <i key={h} className="ds-tick" style={{ left: at(h * 60) }}><small>{h}h</small></i>)}
-        {list.map((a) => (
-          <button key={a.id} type="button" className={`ds-dot${a.status === 'done' ? ' done' : ''}`} style={{ left: at(mins(new Date(a.starts_at))) }}
-            aria-label={`${clock(new Date(a.starts_at))} ${a.patient}`} onClick={() => onOpen(a)}>{a.patient.trim()[0]?.toUpperCase()}</button>
-        ))}
-        {now >= T0 && now <= T1 && <i className="ds-now" style={{ left: at(now) }} aria-hidden="true" />}
-      </div>
+    <section className="day-strip" aria-label="Atendimentos de hoje">
+      <div className="ds-head"><b>Hoje</b><span>{list.length} {list.length === 1 ? 'atendimento' : 'atendimentos'} · {open} {open === 1 ? 'por fazer' : 'por fazer'}</span></div>
+      <ul className="ds-list">
+        {list.map((a) => {
+          const done = a.status === 'done';
+          const late = !done && endMin(a) < nowMin;
+          const cls = ['ds-card', done ? 'done' : '', late ? 'late' : '', a.id === nextId ? 'next' : ''].filter(Boolean).join(' ');
+          return (
+            <li key={a.id}>
+              <button type="button" className={cls} onClick={() => onOpen(a)}>
+                <span className="ds-time">{clock(new Date(a.starts_at))}{a.ends_at ? `–${clock(new Date(a.ends_at))}` : ''}</span>
+                <b>{a.patient.split(/\s+/)[0]}</b>
+                <small>{a.procedure ?? 'Sem procedimento'}</small>
+                <em>{done ? 'Concluído' : late ? 'Atrasado' : a.id === nextId ? 'Próximo' : 'Agendado'}</em>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     </section>
   );
 }
