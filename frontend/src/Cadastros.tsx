@@ -3,6 +3,7 @@ import { ApiError, api, brl } from './api';
 import { useLoad } from './hooks';
 import { ComprovantesDoPaciente } from './Comprovante';
 import { ConcluirAtendimento } from './Atendimento';
+import { ConsentimentoPaciente } from './Consentimento';
 import { Icon } from './Icon';
 import { dayIntervals, fromMin, slotsOf, useHours } from './hours';
 import { RegraRetornoSheet } from './RegraRetorno';
@@ -308,6 +309,7 @@ function PatientDetail({ id, onClose, session, onFinish }: { id: string; onClose
               <p className="muted note">Dados sensíveis: cada acesso a esta ficha é registrado.</p>
             </section>
           )}
+          {p.data && <section className="card"><ConsentimentoPaciente patientId={id} /></section>}
           <PageHead title="Prontuário"><button className="primary sm" onClick={() => setAdding(true)}><Icon name="plus" size={16} />Novo registro</button></PageHead>
           <section className="card">
             <Loading error={recs.error} ready={!!recs.data} />
