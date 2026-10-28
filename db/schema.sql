@@ -20,6 +20,8 @@ CREATE TABLE users (
   google_calendar_id text,                -- NULL = 'primary'
   google_sync_token text,                 -- cursor incremental do Google Calendar
   last_seen_at timestamptz,               -- último sinal do app aberto (presença; ver backend/src/presence.js)
+  terms_accepted_at timestamptz,          -- aceite dos Termos de Uso / Política de Privacidade
+  terms_version text,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { LegalLinks } from './Legal';
 import { ApiError, api } from './api';
 import { AddForm, errText, type Field } from './Cadastros';
 import { useLoad } from './hooks';
@@ -7,7 +8,7 @@ import { Icon } from './Icon';
 import { seenText, usePresence } from './Presence';
 import { Avatar, Empty, ListSkeleton, PageHead, ROLE_LABEL, Sheet, useInstall, useRole, useToast, type Role } from './ui';
 
-export type Me = { name: string; email: string; role: Role; clinic: string };
+export type Me = { name: string; email: string; role: Role; clinic: string; termsAccepted?: boolean };
 type Member = { id: string; name: string; email: string; role: Role; revoked: boolean };
 
 const ROLE_HINT: Record<Exclude<Role, 'owner'>, string> = {
@@ -29,6 +30,7 @@ export function Settings({ me }: { me: Me | null }) {
       {isOwner && <AssistantCard />}
       {isOwner && <PaymentsCard />}
       {isOwner && <WhatsAppCard />}
+      <LegalLinks className="span-all" />
       <footer className="credit span-all"><span>Desenvolvido por</span><img src="/neri-logo.png" alt="NERI Design & Web" /></footer>
     </div>
   );

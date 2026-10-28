@@ -30,6 +30,10 @@ STEPS.push(
   { has: tbl('wa_contacts'), sql: "CREATE TABLE IF NOT EXISTS wa_contacts (\n  clinic_id uuid NOT NULL REFERENCES clinics ON DELETE CASCADE,\n  contact text NOT NULL,\n  display_name text,\n  human_until timestamptz,                   -- enquanto no futuro, a Julia não responde (a equipe assumiu)\n  handoff_reason text,\n  PRIMARY KEY (clinic_id, contact)\n);\n" },
 );
 
+STEPS.push(
+  { has: col('users', 'terms_version'), sql: 'ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted_at timestamptz, ADD COLUMN IF NOT EXISTS terms_version text' },
+);
+
 // ---- Ciclo do procedimento (lotes, aplicações, retorno, consentimento, rastreabilidade) ----
 // Só ADIÇÕES. db/schema.sql recebe exatamente estes mesmos comandos (CYCLE_STEPS) para instalações novas.
 export const CYCLE_STEPS = [

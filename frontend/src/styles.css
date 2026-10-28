@@ -624,3 +624,19 @@ button.ghost.danger { color: var(--neg); border-color: color-mix(in srgb, var(--
 .urg.high { background: var(--out); color: #fff; }
 .patient-head .av { flex: none; }
 .seg2[role='tablist'] { margin: 2px 0 4px; }
+
+/* ---- Termos de Uso / Política de Privacidade ---- */
+.legal { max-width: 720px; margin: 0 auto; padding: 20px 16px 48px; line-height: 1.6; }
+.legal h1 { font-size: 26px; margin: 12px 0 4px; letter-spacing: -0.02em; }
+.legal h2 { font-size: 17px; margin: 22px 0 6px; }
+.legal p { margin: 0 0 10px; }
+.legal a { color: var(--accent); }
+.legal .back { display: inline-flex; align-items: center; min-height: 44px; text-decoration: none; font-weight: 600; }
+.legal-links { text-align: center; font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+.legal-links a { color: var(--accent); }
+.terms-gate { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px; background: rgba(8, 20, 15, .6); }
+.terms-gate .card { max-width: 440px; display: grid; gap: 12px; }
+.terms-gate h2 { margin: 0; font-size: 20px; }
+.terms-gate p { margin: 0; }
+.terms-check { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; }
+.terms-check input { width: 22px; height: 22px; margin-top: 2px; accent-color: var(--accent); flex: none; }
