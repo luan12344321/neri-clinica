@@ -61,7 +61,7 @@ test('erro próprio da ferramenta chega ao modelo com mensagem segura', async ()
 test('limite de iterações: não entra em loop infinito de ferramentas', async () => {
   const c = fakeClient(() => toolUse('restock'));
   const r = await ask(A, c);
-  assert.equal(c.calls.length, 6);
+  assert.equal(c.calls.length, 8);
   assert.match(r.reply, /Não consegui concluir/);
 });
 
