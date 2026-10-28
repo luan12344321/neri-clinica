@@ -127,7 +127,13 @@ export function Segmented<T extends string>({ value, onChange, options }: { valu
 export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
-  componentDidCatch(error: unknown) { console.error(error); }
+  componentDidCatch(error: unknown) {
+    console.error(error);
+    try { // avisa o servidor (sem dados do paciente): só mensagem curta e pilha
+      const e = error as Error;
+      navigator.sendBeacon('/api/client-error', new Blob([JSON.stringify({ message: String(e?.message ?? error).slice(0, 300), stack: String(e?.stack ?? '').slice(0, 1500), path: location.pathname })], { type: 'application/json' }));
+    } catch { /* sem rede: ignora */ }
+  }
   render() {
     if (!this.state.failed) return this.props.children;
     return (

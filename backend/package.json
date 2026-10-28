@@ -8,6 +8,7 @@
     "db:init": "node --env-file=.env scripts/seed.js",
     "db:schema": "node --env-file=.env scripts/migrate.js",
     "clinic:create": "node --env-file=.env scripts/create-clinic.js",
+    "clinic:export": "node --env-file=.env scripts/export-clinic.js",
     "test": "node --test \"test/*.test.js\""
   },
   "devDependencies": {
