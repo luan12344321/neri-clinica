@@ -190,15 +190,16 @@ export default async function fila(app) {
 
     // atendimentos que passaram do horário sem concluir
     const late = await q(
-      `SELECT a.id, p.full_name, to_char(a.starts_at AT TIME ZONE $2,'HH24:MI') AS hhmm
+      `SELECT a.id, p.full_name, a.starts_at, a.ends_at, to_char(a.starts_at AT TIME ZONE $2,'HH24:MI') AS hhmm,
+              to_char(a.starts_at AT TIME ZONE $2,'DD/MM') AS ddmm, (a.starts_at AT TIME ZONE $2)::date::text AS day
        FROM appointments a JOIN patients p ON p.id=a.patient_id
        WHERE a.clinic_id=$1 AND a.status IN ('scheduled','confirmed') AND a.ends_at < now() AND a.starts_at > now() - interval '7 days'
        ORDER BY a.starts_at LIMIT 50`, [cid, TZ]);
     if (late.length) push({
       id: 'late_appointments', kind: 'late_appointments', urgency: 'high', owner: 'doctor', count: late.length,
       title: late.length === 1 ? 'Atendimento sem conclusão' : `${late.length} atendimentos sem conclusão`,
-      detail: late.slice(0, 3).map((a) => `${firstName(a.full_name)} (${a.hhmm})`).join(', '),
-      refs: late.slice(0, 10).map((a) => ({ id: a.id, label: firstName(a.full_name) })),
+      detail: late.slice(0, 3).map((a) => `${firstName(a.full_name)} (${a.day === today ? '' : a.ddmm + ' '}${a.hhmm})`).join(', '),
+      refs: late.slice(0, 10).map((a) => ({ id: a.id, label: firstName(a.full_name), starts_at: a.starts_at, ends_at: a.ends_at })),
       nextActions: [{ kind: 'check_status', label: 'Verificar status' }, { kind: 'register', label: 'Registrar' },
         { kind: 'reschedule', label: 'Reagendar' }, { kind: 'forward', label: 'Encaminhar' }],
     });

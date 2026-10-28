@@ -241,8 +241,9 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
   const goAgenda = () => document.getElementById('agenda-hoje')?.scrollIntoView({ behavior: 'smooth' });
   // Ações da lista "Precisa de atenção". "Encaminhar" não tem tela própria: leva à agenda do dia.
   const onAttnAction = (kind: string) => {
-    if (kind === 'register') { if (late[0]) complete(late[0].id); else goAgenda(); }
-    else if (kind === 'reschedule') { if (late[0]) setMoving(late[0]); else goAgenda(); }
+    const ref = (att.data?.items as any[] | undefined)?.find((i) => i.kind === 'late_appointments')?.refs?.[0] ?? late[0]; // inclui dias anteriores
+    if (kind === 'register') { if (ref) complete(ref.id); else goAgenda(); }
+    else if (kind === 'reschedule') { if (ref) setMoving(ref); else goAgenda(); }
     else if (kind === 'check_status' || kind === 'forward') goAgenda();
     else if (kind === 'open_returns') document.getElementById('retornos-do-dia')?.scrollIntoView({ behavior: 'smooth' });
     else if (kind === 'open_payables' || kind === 'open_receivables') go('financeiro', 'contas');
