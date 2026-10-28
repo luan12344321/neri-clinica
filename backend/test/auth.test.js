@@ -18,7 +18,7 @@ test('/me devolve nome, papel e clínica do usuário logado e exige token', asyn
   const r = await t.call('POST', '/auth/login', { body: { email: 'gestor@demo.test', password: 'demo1234' } });
   const me = await t.call('GET', '/me', { token: r.json.token });
   assert.equal(me.status, 200);
-  assert.deepEqual(me.json, { name: 'Gestor Demo', email: 'gestor@demo.test', role: 'owner', clinic: 'Clínica Demo' });
+  assert.deepEqual(me.json, { name: 'Gestor Demo', email: 'gestor@demo.test', role: 'owner', clinic: 'Clínica Demo', termsAccepted: false });
   assert.equal((await t.call('GET', '/me')).status, 401);
 });
 

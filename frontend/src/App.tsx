@@ -8,6 +8,7 @@ import { ApptSheet, DayStrip, DayTimeline, ageOf } from './Timeline';
 import { ConcluirAtendimento } from './Atendimento';
 import { AtencaoLista, RetornosDoDia, type AttItem } from './RetornosDoDia';
 import { useHours } from './hours';
+import { LegalLinks, LegalPage, TermsGate, legalFromHash } from './Legal';
 import { Avatar, Empty, ErrorBoundary, EyeToggle, ListSkeleton, RoleProvider, ToastProvider, mask, useHideValues, useRole } from './ui';
 import { Settings, type Me } from './Settings';
 import { PresenceButton } from './Presence';
@@ -44,12 +45,17 @@ const pct = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 1 
 
 export default function App() {
   const [authed, setAuthed] = useState(!!getToken());
+  const [hash, setHash] = useState(window.location.hash);
+  useEffect(() => { const f = () => setHash(window.location.hash); window.addEventListener('hashchange', f); return () => window.removeEventListener('hashchange', f); }, []);
+  const legal = legalFromHash(hash);
+  if (legal) return <ErrorBoundary><LegalPage kind={legal} /></ErrorBoundary>;
   if (!authed) return <ErrorBoundary><Splash /><Login onDone={() => setAuthed(true)} /></ErrorBoundary>;
   return <ErrorBoundary><ToastProvider><Splash /><Shell onLogout={() => { setToken(null); setAuthed(false); }} /></ToastProvider></ErrorBoundary>;
 }
 
 function Shell({ onLogout }: { onLogout: () => void }) {
   const me = useLoad<Me>('/me');
+  if (me.data && me.data.termsAccepted === false) return <TermsGate onAccepted={me.reload} />;
   return <RoleProvider role={me.data?.role ?? null}><ShellInner onLogout={onLogout} me={me.data} /></RoleProvider>;
 }
 
@@ -181,6 +187,7 @@ function Login({ onDone }: { onDone: () => void }) {
       {error && <p role="alert" className="err">{error}</p>}
       <button className="primary" disabled={busy}>{busy ? 'Entrando…' : 'Entrar'}</button>
       <p className="login-hint">Esqueceu a senha? Peça ao proprietário para redefinir em Configurações → Equipe.</p>
+      <LegalLinks />
     </form>
     </div>
   );

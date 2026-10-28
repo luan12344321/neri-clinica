@@ -87,10 +87,25 @@ app.post('/auth/login', { config: { rateLimit: { max: 10, timeWindow: '1 minute'
   return { token: app.jwt.sign({ userId: u.id, clinicId: u.clinic_id, role: u.role }, { expiresIn: '12h' }) };
 });
 
+// Versão dos Termos de Uso / Política de Privacidade (mesma de frontend/src/Legal.tsx). Mudou? Todos aceitam de novo.
+const TERMS_VERSION = '2026-10';
+
 app.get('/me', guard, async (req, reply) => {
-  const [u] = await q(`SELECT u.name, u.email, u.role, c.name AS clinic FROM users u JOIN clinics c ON c.id=u.clinic_id
+  await ensureSchema();
+  const [u] = await q(`SELECT u.name, u.email, u.role, c.name AS clinic, u.terms_version FROM users u JOIN clinics c ON c.id=u.clinic_id
                        WHERE u.id=$1 AND u.clinic_id=$2`, [req.user.userId, clinic(req)]);
-  return u ?? reply.code(401).send({ error: 'unauthorized' });
+  if (!u) return reply.code(401).send({ error: 'unauthorized' });
+  const { terms_version: tv, ...me } = u;
+  return { ...me, termsAccepted: tv === TERMS_VERSION };
+});
+
+app.post('/me/terms', guard, async (req, reply) => {
+  await ensureSchema();
+  const { version } = z.object({ version: z.string() }).parse(req.body);
+  if (version !== TERMS_VERSION) return reply.code(400).send({ error: 'terms version outdated' });
+  await q('UPDATE users SET terms_accepted_at=now(), terms_version=$3 WHERE id=$1 AND clinic_id=$2', [req.user.userId, clinic(req), version]);
+  await q(`INSERT INTO audit_log (clinic_id, user_id, action, entity, entity_id) VALUES ($1,$2::uuid,'terms.accepted','user',$2::text)`, [clinic(req), req.user.userId]);
+  return { ok: true, version };
 });
 
 app.post('/me/password', { ...guard, config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (req, reply) => {
