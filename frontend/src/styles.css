@@ -588,3 +588,32 @@ button.ghost.danger { color: var(--neg); border-color: color-mix(in srgb, var(--
 .tl-gap { position: absolute; left: 48px; right: 0; display: grid; place-items: center; border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); background: repeating-linear-gradient(135deg, #f0eee6 0 8px, #f6f4ee 8px 16px); border-radius: 6px; }
 .tl-gap span { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .session .grow { flex: 1 1 170px; min-width: 170px; }
+
+/* ---- Referências visuais: cartões de resumo, faixa do dia, urgência, números grandes (só bege, branco e verde) ---- */
+.tk { border-radius: 20px; padding: 16px; }
+.tk-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.tk-top .tk-ico { margin-bottom: 0; width: 36px; height: 36px; border-radius: 12px; }
+.tk-badge { font-size: 12px; font-weight: 650; padding: 3px 10px; border-radius: 99px; background: var(--ok-soft); color: var(--ok); white-space: nowrap; }
+.tk.primary { background: var(--hero); border-color: var(--hero); color: #fff; }
+.tk.primary .tk-ico { background: rgba(255, 255, 255, .14); color: #fff; }
+.tk.primary .tk-label { color: rgba(255, 255, 255, .75); }
+.tk.primary .tk-badge { background: #fff; color: var(--hero); }
+.big-fig { display: flex; align-items: baseline; gap: 8px; margin: -4px 0 6px; }
+.big-fig strong { font-size: 28px; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.big-fig span { color: var(--muted); font-size: 13px; }
+.legend b { background: var(--accent-soft); color: var(--accent); border-radius: 99px; padding: 2px 10px; font-size: 13px; }
+.day-strip { display: flex; align-items: center; gap: 14px; background: var(--hero); color: var(--hero-ink); border-radius: 99px; padding: 10px 18px; }
+.ds-title { font-weight: 650; font-size: 14px; }
+.ds-track { position: relative; flex: 1; height: 44px; margin-right: 12px; }
+.ds-tick { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed rgba(255, 255, 255, .22); }
+.ds-tick small { position: absolute; bottom: -2px; left: 4px; font-size: 10px; opacity: .6; font-style: normal; }
+.ds-dot { position: absolute; top: 4px; transform: translateX(-50%); width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: #fff; color: var(--hero); font-size: 12px; font-weight: 700; display: grid; place-items: center; }
+.ds-dot.done { opacity: .45; }
+.ds-now { position: absolute; top: -6px; bottom: -6px; width: 3px; border-radius: 3px; background: #fff; transform: translateX(-50%); box-shadow: 0 0 0 3px rgba(255, 255, 255, .2); }
+.day-grid > .day-strip { grid-column: 1 / -1; }
+.attn-item { background: var(--card); border: 1px solid var(--line); }
+.attn-item.high { background: var(--warn-soft); border-color: transparent; }
+.urg { font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); }
+.urg.high { background: var(--out); color: #fff; }
+.patient-head .av { flex: none; }
+.seg2[role='tablist'] { margin: 2px 0 4px; }

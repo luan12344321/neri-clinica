@@ -4,7 +4,7 @@ import { Area, AreaChart, Bar, BarChart, Cell, Pie, PieChart, ResponsiveContaine
 import { ApiError, api, brl, getToken, lastMonths, monthLabel, setToken, thisMonth } from './api';
 import { Icon, type IconName } from './Icon';
 import { AppointmentSheet, Cadastros, NewAppointment, RescheduleSheet, type Focus, type Section } from './Cadastros';
-import { ApptSheet, DayTimeline, ageOf } from './Timeline';
+import { ApptSheet, DayStrip, DayTimeline, ageOf } from './Timeline';
 import { ConcluirAtendimento } from './Atendimento';
 import { AtencaoLista, RetornosDoDia, type AttItem } from './RetornosDoDia';
 import { useHours } from './hours';
@@ -274,11 +274,11 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
       ? { icon: 'pulse' as IconName, text: `Faturamento ${pct(Math.abs(delta))}% ${delta > 0 ? 'acima' : 'abaixo'} do mês anterior.`, cta: 'Ver resumo', run: () => go('financeiro', 'resumo') }
       : null;
 
-  const kpis: { icon: IconName; label: string; value: string; hot?: boolean; eye?: boolean }[] = [
+  const kpis: { icon: IconName; label: string; value: string; hot?: boolean; eye?: boolean; primary?: boolean; badge?: string }[] = [
     { icon: 'users', label: 'Pacientes hoje', value: String(patientsToday) },
     { icon: 'check', label: 'Atendimentos concluídos', value: `${doneToday} de ${today.length}` },
     { icon: 'alert', label: 'Pendências', value: String(att.data ? att.data.items.length : todo.length), hot: (att.data ? att.data.items.length : todo.length) > 0 },
-    ...(money ? [{ icon: 'wallet' as IconName, label: 'Faturamento do dia', value: mask(brl(d?.todayRevenue ?? 0), hidden), eye: true }] : []),
+    ...(money ? [{ icon: 'wallet' as IconName, label: 'Faturamento do dia', value: mask(brl(d?.todayRevenue ?? 0), hidden), eye: true, primary: true, ...(delta !== null ? { badge: `${delta > 0 ? '+' : ''}${pct(delta)}% no mês` } : {}) }] : []),
   ];
   const quick: { icon: IconName; label: string; run: () => void }[] = [
     { icon: 'calendar', label: 'Novo agendamento', run: onBook },
@@ -298,13 +298,15 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
         <>
           <section className={`top-kpis n${kpis.length} span-all`} aria-label="Resumo do dia">
             {kpis.map((k) => (
-              <div key={k.label} className={`tk${k.hot ? ' hot' : ''}`}>
-                <span className="tk-ico"><Icon name={k.icon} size={18} /></span>
+              <div key={k.label} className={`tk${k.hot ? ' hot' : ''}${k.primary ? ' primary' : ''}`}>
+                <span className="tk-top"><span className="tk-ico"><Icon name={k.icon} size={18} /></span>{k.badge && <span className="tk-badge">{k.badge}</span>}</span>
                 <strong>{k.value}</strong>
                 <span className="tk-label">{k.label}{k.eye && <EyeToggle className="inline small" />}</span>
               </div>
             ))}
           </section>
+
+          <div className="span-all"><DayStrip appts={today} onOpen={setOpen} /></div>
 
           <div className="day-grid span-all">
             <section className="next-card g-next">
@@ -422,19 +424,19 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
           {money && (
             <section className="card">
               <div className="between"><h2>Faturamento mensal</h2><Delta value={delta} /></div>
-              <div className="chart" role="img" aria-label="Gráfico de área do faturamento dos últimos 6 meses">
+              <div className="big-fig"><strong>{mask(brl(cur.revenue), hidden)}</strong><span>neste mês</span></div>
+              <div className="chart" role="img" aria-label="Gráfico de barras do faturamento dos últimos 6 meses">
                 <ResponsiveContainer width="100%" height={200}>
-                  <AreaChart data={series} margin={{ top: 8, right: 8, left: -14, bottom: 0 }}>
-                    <defs><linearGradient id="g-rev" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" style={{ stopColor: 'var(--accent)', stopOpacity: 0.28 }} /><stop offset="100%" style={{ stopColor: 'var(--accent)', stopOpacity: 0 }} />
-                    </linearGradient></defs>
+                  <BarChart data={series} margin={{ top: 8, right: 8, left: -14, bottom: 0 }}>
                     <CartesianGrid vertical={false} stroke="var(--line)" />
                     <XAxis dataKey="m" tickLine={false} axisLine={false} tick={{ fill: 'var(--muted)', fontSize: 12 }} />
                     <YAxis tickLine={false} axisLine={false} width={44} tick={{ fill: 'var(--muted)', fontSize: 12 }} tickFormatter={(v) => (v >= 1000 ? `${v / 1000}k` : v)} />
                     <Tooltip formatter={(v: number) => [hidden ? '••••' : brl(v), 'Receita']}
                       contentStyle={{ background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--ink)' }} />
-                    <Area type="monotone" dataKey="revenue" stroke="var(--accent)" strokeWidth={2.5} fill="url(#g-rev)" />
-                  </AreaChart>
+                    <Bar dataKey="revenue" radius={[10, 10, 10, 10]} maxBarSize={34}>
+                      {series.map((r, i) => <Cell key={r.month} fill={i === series.length - 1 ? 'var(--c1)' : 'var(--c4)'} />)}
+                    </Bar>
+                  </BarChart>
                 </ResponsiveContainer>
               </div>
             </section>
@@ -447,7 +449,7 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
                 <div className="donut" role="img" aria-label="Proporção dos procedimentos realizados">
                   <ResponsiveContainer width="100%" height={168}>
                     <PieChart>
-                      <Pie data={d.topProcedures} dataKey="total" nameKey="name" innerRadius="68%" outerRadius="100%" paddingAngle={d.topProcedures.length > 1 ? 2 : 0} stroke="none" isAnimationActive={false}>
+                      <Pie data={d.topProcedures} dataKey="total" nameKey="name" innerRadius="66%" outerRadius="100%" cornerRadius={8} paddingAngle={d.topProcedures.length > 1 ? 4 : 0} stroke="none" isAnimationActive={false}>
                         {d.topProcedures.map((p: any, i: number) => <Cell key={p.name} fill={`var(--c${(i % 6) + 1})`} />)}
                       </Pie>
                     </PieChart>

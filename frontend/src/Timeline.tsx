@@ -117,3 +117,25 @@ export function ApptSheet({ appt, clinical, busy, onClose, onStart, onChart, onC
     </Sheet>
   );
 }
+
+// Faixa do dia: pílula verde com os atendimentos de hoje como pontos sobre as horas (07h–20h) e a marca do "agora".
+export function DayStrip({ appts, onOpen }: { appts: Appt[]; onOpen: (a: Appt) => void }) {
+  const list = appts.filter((a) => a.status !== 'canceled');
+  if (!list.length) return null;
+  const T0 = 7 * 60, T1 = 20 * 60;
+  const at = (m: number) => `${Math.min(100, Math.max(0, ((m - T0) / (T1 - T0)) * 100))}%`;
+  const now = mins(new Date());
+  return (
+    <section className="day-strip" aria-label="Linha do dia">
+      <span className="ds-title">Hoje</span>
+      <div className="ds-track">
+        {[8, 10, 12, 14, 16, 18].map((h) => <i key={h} className="ds-tick" style={{ left: at(h * 60) }}><small>{h}h</small></i>)}
+        {list.map((a) => (
+          <button key={a.id} type="button" className={`ds-dot${a.status === 'done' ? ' done' : ''}`} style={{ left: at(mins(new Date(a.starts_at))) }}
+            aria-label={`${clock(new Date(a.starts_at))} ${a.patient}`} onClick={() => onOpen(a)}>{a.patient.trim()[0]?.toUpperCase()}</button>
+        ))}
+        {now >= T0 && now <= T1 && <i className="ds-now" style={{ left: at(now) }} aria-hidden="true" />}
+      </div>
+    </section>
+  );
+}
