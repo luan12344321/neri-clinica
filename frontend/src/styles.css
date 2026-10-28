@@ -559,7 +559,7 @@ button.ghost.danger { color: var(--neg); border-color: color-mix(in srgb, var(--
 .g-next { order: 1; } .g-attn { order: 2; } .g-timeline { order: 3; } .g-quick { order: 4; }
 @media (min-width: 1024px) {
   .g-side { display: grid; gap: 18px; align-content: start; grid-area: side; }
-  .day-grid { grid-template-areas: "next side" "timeline side"; }
+  .day-grid { grid-template-areas: "next side" "timeline side"; grid-template-rows: auto 1fr; }
   .g-attn, .g-quick { grid-area: auto; order: 0; }
   .kpis { grid-template-columns: repeat(3, 1fr); }
   .kpis > :last-child:nth-child(odd) { grid-column: auto; }

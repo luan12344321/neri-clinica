@@ -19,6 +19,7 @@ const useList = useLoad;
 const KNOWN: Record<string, string> = {
   'email in use': 'Já existe um usuário com esse e-mail.',
   'wrong password': 'Senha atual incorreta.',
+  slot_taken: 'Esse horário já está ocupado. Escolha outro horário.',
 };
 export const errText = (e: unknown) =>
   e instanceof ApiError && e.status === 403 && e.message in KNOWN ? KNOWN[e.message]!

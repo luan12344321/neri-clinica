@@ -68,6 +68,11 @@ export async function suggestReturn(client, { clinicId, appointmentId, patientId
      RETURNING ${cols}`,
     [clinicId, patientId, appointmentId, procedureId, rule.target_days, rule.window_min_days, TZ, rule.window_max_days]);
   if (created) {
+    // o paciente refez o procedimento: os retornos antigos em aberto do mesmo procedimento deixam de valer (evita fila duplicada)
+    await client.query(
+      `UPDATE returns SET state='done', updated_at=now()
+       WHERE clinic_id=$1 AND patient_id=$2 AND procedure_id=$3 AND id<>$4 AND state IN ('suggested','remind_later','no_response')`,
+      [clinicId, patientId, procedureId, created.id]);
     await client.query(`INSERT INTO audit_log (clinic_id, action, entity, entity_id) VALUES ($1,'return.suggested','return',$2)`, [clinicId, created.id]);
     return created;
   }
