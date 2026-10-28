@@ -147,7 +147,7 @@ test('outra clínica fica isolada: produto, lote e atendimento', async () => {
   const id = await appt();
   const tokenB = await t.tokenFor('b@demo.test');
   assert.equal((await t.call('GET', `/appointments/${id}/conclusion-context`, { token: tokenB })).status, 404);
-  assert.equal((await conclude(id, tokenB, [])).status, 409); // atendimento de A, visto de B
+  assert.equal((await conclude(id, tokenB, [])).status, 404); // atendimento de A, visto de B (404: nunca vaza; antes era 409)
   assert.equal((await t.sql('SELECT status FROM appointments WHERE id=$1', [id]))[0].status, 'scheduled');
   // produto/lote de outra clínica usados por A
   const [pB] = await t.sql(`INSERT INTO products (clinic_id, name, quantity) VALUES ($1,'Produto B',5) RETURNING id`, [B]);

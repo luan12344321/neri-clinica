@@ -279,6 +279,7 @@ function PatientDetail({ id, onClose, session, onFinish }: { id: string; onClose
   const [finishing, setFinishing] = useState(false); // folha "Concluir atendimento" aberta (baixa de estoque só com confirmação)
   const p = useLoad<any>(`/patients/${id}`);
   const recs = useLoad<any[]>(`/patients/${id}/records`);
+  const ai = useLoad<any[]>(`/patients/${id}/ai-usage`); // vezes em que a Julia consultou o prontuário
   const [adding, setAdding] = useState(false);
   const toast = useToast();
   const denied = p.error === 'forbidden' || recs.error === 'forbidden';
@@ -321,6 +322,7 @@ function PatientDetail({ id, onClose, session, onFinish }: { id: string; onClose
                 {r.evolution && <div className="pre">{r.evolution}</div>}
               </li>
             ))}</ul>
+            {ai.data && ai.data.length > 0 && <p className="muted note">Julia consultou este prontuário em {new Date(ai.data[0].createdAt).toLocaleString('pt-BR')}{ai.data.length > 1 ? ` (${ai.data.length} consultas)` : ''}.</p>}
           </section>
           {id && <ComprovantesDoPaciente patientId={id} />}
           {adding && (
@@ -353,7 +355,7 @@ function Procedures() {
         {l.data?.length === 0 && <Empty icon="syringe" title="Nenhum procedimento" text="Cadastre os serviços da clínica com preço e duração.">{isManager && <button className="primary sm" onClick={() => setAdding(true)}>Novo procedimento</button>}</Empty>}
         <ul className="rows">{l.data?.map((p) => (
           <li key={p.id}>
-            <div className="row-btn static">
+            <div className="row-btn static with-action">
               <span className="q-ico"><Icon name="syringe" size={20} /></span>
               <span className="grow"><b>{p.name}</b><span className="muted">{p.duration_min} min</span></span>
               <b className="amount">{brl(Number(p.default_price))}</b>

@@ -121,7 +121,7 @@ export async function createTraceabilityDocument({ clinicId, appointmentId, user
 
 export default async function rastreabilidade(app) {
   const clinical = { onRequest: [app.auth, async (req, reply) => {
-    if (!CLINICAL.includes(req.user.role)) reply.code(403).send({ error: 'forbidden' });
+    if (!CLINICAL.includes(req.user.role)) return reply.code(403).send({ error: 'forbidden' });
   }] };
   const cid = (req) => req.user.clinicId;
   const idParam = (req) => z.object({ id: z.guid() }).parse(req.params).id;
