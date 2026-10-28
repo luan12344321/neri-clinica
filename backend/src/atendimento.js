@@ -98,7 +98,10 @@ export default async function atendimento(app) {
       const { rows: [a] } = await c.query(
         `UPDATE appointments SET status='done', completed_at=now(), updated_at=now()
          WHERE id=$1 AND clinic_id=$2 AND status IN ('scheduled','confirmed') RETURNING *`, [id, clinicId]);
-      if (!a) throw new Rule(409, 'not completable');
+      if (!a) {
+        const { rowCount } = await c.query('SELECT 1 FROM appointments WHERE id=$1 AND clinic_id=$2', [id, clinicId]);
+        throw rowCount ? new Rule(409, 'not completable') : new Rule(404, 'not found'); // outra clínica ou inexistente: 404, sem vazar
+      }
       appt = a;
       if (a.price) { // mesma regra do POST /appointments/:id/complete
         await c.query(
@@ -165,7 +168,7 @@ export default async function atendimento(app) {
     // Depois do COMMIT: o comprovante não desfaz a aplicação se falhar.
     let traceability = null;
     try { traceability = (await createTraceabilityDocument({ clinicId, appointmentId: appt.id, userId })) ?? null; }
-    catch (e) { req.log.error(e); }
+    catch (e) { req.log.error({ err: { type: e?.name, code: e?.code, message: e?.message } }, 'comprovante nao gerado'); }
 
     const res = {
       appointment: appt,

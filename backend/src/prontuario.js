@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { q } from './db.js';
 import { audit, auditCtx } from './audit.js';
+import { ensureSchema } from './schema.js';
 import { blindIndex, decrypt, encrypt, normalizeCpf } from './crypto.js';
 
 // Dados sensíveis (LGPD art. 5º, II): CPF e prontuário. Só perfis clínicos leem; toda leitura/escrita é auditada.
@@ -104,6 +105,19 @@ export default async function prontuario(app) {
       ...JSON.parse(decrypt(r.data_enc, recordAad(r.id))) }));
     await audit(auditCtx(req), 'record.read', 'patient', id);
     return records;
+  });
+
+  // Vezes em que a Julia (IA) consultou o prontuário deste paciente. Só perfis clínicos; recepção não vê.
+  app.get('/patients/:id/ai-usage', clinical, async (req, reply) => {
+    const p = z.object({ id: z.guid() }).safeParse(req.params);
+    if (!p.success) return reply.code(404).send({ error: 'not found' });
+    const [ok] = await q('SELECT 1 FROM patients WHERE id=$1 AND clinic_id=$2', [p.data.id, cid(req)]);
+    if (!ok) return reply.code(404).send({ error: 'not found' });
+    await ensureSchema();
+    const rows = await q(
+      `SELECT u.tool, us.name AS user_name, u.created_at FROM ai_record_usage u LEFT JOIN users us ON us.id=u.user_id
+       WHERE u.clinic_id=$1 AND u.patient_id=$2 ORDER BY u.created_at DESC, u.id DESC LIMIT 50`, [cid(req), p.data.id]);
+    return rows.map((r) => ({ tool: r.tool, userName: r.user_name, createdAt: r.created_at }));
   });
 
   // Quem acessou o quê: apenas o dono da clínica.

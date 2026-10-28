@@ -28,7 +28,8 @@ await app.register(jwt, { secret: process.env.JWT_SECRET });
 app.setErrorHandler((err, req, reply) => {
   if (err instanceof z.ZodError) return reply.code(400).send({ error: 'validation', issues: err.issues });
   if (err.statusCode && err.statusCode < 500) return reply.code(err.statusCode).send({ error: err.message });
-  req.log.error(err);
+  // LGPD: só tipo, código e mensagem; os campos extras do erro do pg (detail, where, parameters) podem trazer valores de linhas
+  req.log.error({ err: { type: err.name, code: err.code, message: err.message, stack: err.stack } }, 'erro interno');
   reply.code(500).send({ error: 'internal' });
 });
 
@@ -226,7 +227,7 @@ app.get('/protocols', guard, (req) =>
 const aiError = (req, reply, e) => {
   const f = aiFailure(e);
   if (!f) throw e;
-  req.log.error(e);
+  req.log.error({ err: e?.name, status: e?.status }, 'ia indisponivel'); // sem o corpo da resposta do provedor (pode ecoar o conteúdo enviado)
   return reply.code(f.code).send({ error: f.error });
 };
 app.post('/sara/chat', { ...guard, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
