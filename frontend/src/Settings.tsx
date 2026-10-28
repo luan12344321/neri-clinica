@@ -13,7 +13,7 @@ type Member = { id: string; name: string; email: string; role: Role; revoked: bo
 const ROLE_HINT: Record<Exclude<Role, 'owner'>, string> = {
   manager: 'Tudo, menos gerenciar a equipe: financeiro, estoque, cadastros, mensagens e a Julia.',
   professional: 'Agenda, pacientes e prontuário. Não vê o financeiro.',
-  reception: 'Agenda, cadastro de pacientes, estoque e a Julia (agenda e estoque). Sem acesso a financeiro, produtos, mensagens, CPF, prontuário e equipe.',
+  reception: 'Agenda, cadastro de pacientes, estoque e reposição (entradas, perdas e novos produtos) e a Julia. Sem acesso a financeiro, custos, mensagens, CPF, prontuário e equipe.',
 };
 const ROLE_OPTIONS = (Object.keys(ROLE_HINT) as (keyof typeof ROLE_HINT)[]).map((value) => ({ value, label: ROLE_LABEL[value] }));
 

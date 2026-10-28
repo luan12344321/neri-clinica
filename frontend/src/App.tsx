@@ -23,7 +23,7 @@ const NAV: { group: string; items: { id: View; label: string; icon: IconName; mg
   { group: 'Gestão', items: [
     { id: 'financeiro', label: 'Financeiro', icon: 'chart', mgr: true },
     { id: 'estoque', label: 'Estoque e reposição', icon: 'box' },
-    { id: 'produtos', label: 'Produtos', icon: 'tag', mgr: true },
+    { id: 'produtos', label: 'Produtos', icon: 'tag' },
   ] },
   { group: 'Cadastros', items: [
     { id: 'pacientes', label: 'Pacientes', icon: 'users' },
@@ -523,7 +523,7 @@ function Stock({ go }: { go: (v: View, tab?: FinTab) => void }) {
   return (
     <div className="dash">
       <section className="card">
-        <div className="between"><h2>O que repor</h2>{isManager && <button className="link" onClick={() => go('produtos')}>Registrar entrada</button>}</div>
+        <div className="between"><h2>O que repor</h2><button className="link" onClick={() => go('produtos')}>Registrar entrada</button></div>
         <Status error={restock.error} loading={!restock.data} />
         {restock.data && (restock.data.length === 0 ? <Empty icon="check" title="Estoque em dia" text="Nenhum produto está no mínimo ou abaixo." /> : (
           <ul className="rows">
