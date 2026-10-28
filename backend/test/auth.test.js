@@ -64,12 +64,14 @@ test('token do `state` do OAuth (sem clinicId) não autentica', async () => {
   assert.equal((await t.call('GET', '/dashboard', { token: state })).status, 401);
 });
 
-test('recepção lê cadastros mas não escreve (403)', async () => {
+test('recepção lê cadastros, cuida do estoque, mas não altera cadastros de gestão (403)', async () => {
   const token = await t.tokenFor('recepcao@demo.test');
   assert.equal((await t.call('GET', '/procedures', { token })).status, 200);
   const w = await t.call('POST', '/procedures', { token, body: { name: 'Novo', defaultPrice: 10 } });
   assert.equal(w.status, 403);
-  assert.equal((await t.call('POST', '/products', { token, body: { name: 'X', minQuantity: 1, targetQuantity: 2 } })).status, 403);
+  const p = await t.call('POST', '/products', { token, body: { name: 'Item X', minQuantity: 1, targetQuantity: 2, unitCost: 5 } });
+  assert.equal(p.status, 201, 'recepção cuida do estoque');
+  assert.ok(!('unit_cost' in p.json), 'mas sem o custo');
 });
 
 test('GET /health é público', async () => {

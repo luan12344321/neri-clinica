@@ -417,7 +417,7 @@ function Products() {
   return (
     <>
       <PageHead title="Produtos" hint={l.data ? (lowCount ? `${lowCount} abaixo do mínimo` : 'Estoque em dia') : undefined}>
-        {isManager && <button className="primary sm" onClick={() => setAdding(true)}><Icon name="plus" size={16} />Novo produto</button>}
+        <button className="primary sm" onClick={() => setAdding(true)}><Icon name="plus" size={16} />Novo produto</button>
       </PageHead>
       <section className="card list-card">
         <Loading error={l.error} ready={!!l.data} />
@@ -431,7 +431,7 @@ function Products() {
             { name: 'unit', label: 'Unidade', def: 'un' },
             { name: 'minQuantity', label: 'Estoque mínimo (avisar abaixo disso)', type: 'number', step: 'any', required: true },
             { name: 'targetQuantity', label: 'Estoque alvo (quanto ter após repor)', type: 'number', step: 'any', required: true },
-            { name: 'unitCost', label: 'Custo unitário (R$)', type: 'number', step: '0.01' },
+            ...(isManager ? [{ name: 'unitCost', label: 'Custo unitário (R$)', type: 'number' as const, step: '0.01' }] : []), // custo é dado financeiro
           ]} />
         </Sheet>
       )}
