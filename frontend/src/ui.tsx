@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { Component, createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Icon, type IconName } from './Icon';
 
@@ -30,14 +31,16 @@ export function Sheet({ title, onClose, children }: { title: string; onClose: ()
     ref.current?.querySelector<HTMLElement>('input, select, textarea')?.focus();
     return () => { removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
   }, [onClose]);
-  return (
+  // Renderiza direto no <body>: dentro de um cartão com animação/transform o "fixed" prende o formulário ao cartão (o botão ficava atrás de outros cartões e da barra de baixo).
+  return createPortal(
     <div className="sheet-wrap">
       <div className="scrim" onClick={onClose} />
       <section ref={ref} className="sheet" role="dialog" aria-modal="true" aria-label={title}>
         <header><h2>{title}</h2><button className="icon-btn" aria-label="Fechar" onClick={onClose}><Icon name="close" /></button></header>
         {children}
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
