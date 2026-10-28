@@ -281,8 +281,10 @@ function PatientDetail({ id, onClose, session, onFinish }: { id: string; onClose
   const recs = useLoad<any[]>(`/patients/${id}/records`);
   const ai = useLoad<any[]>(`/patients/${id}/ai-usage`); // vezes em que a Julia consultou o prontuário
   const [adding, setAdding] = useState(false);
+  const [tab, setTab] = useState<'prontuario' | 'autorizacoes' | 'comprovantes'>('prontuario');
   const toast = useToast();
   const denied = p.error === 'forbidden' || recs.error === 'forbidden';
+  const allergy = recs.data?.find((r) => r.allergies)?.allergies as string | undefined;
   return (
     <>
       <button className="back" onClick={onClose}><Icon name="back" size={18} />Pacientes</button>
@@ -298,9 +300,10 @@ function PatientDetail({ id, onClose, session, onFinish }: { id: string; onClose
           <Loading error={p.error} ready={!!p.data} rows={2} />
           {p.data && (
             <section className="card patient-head">
-              <Avatar name={p.data.full_name} size={56} />
+              <Avatar name={p.data.full_name} size={72} />
               <div className="grow">
                 <h2>{p.data.full_name}</h2>
+                {allergy && <span className="pill warn" style={{ marginBottom: 6 }}>Alergia: {allergy.length > 40 ? `${allergy.slice(0, 40)}…` : allergy}</span>}
                 <dl className="facts">
                   <dt>CPF</dt><dd>{p.data.cpf ? fmtCpf(p.data.cpf) : '—'}</dd>
                   <dt>Telefone</dt><dd>{p.data.phone ?? '—'}</dd>
@@ -310,9 +313,14 @@ function PatientDetail({ id, onClose, session, onFinish }: { id: string; onClose
               <p className="muted note">Dados sensíveis: cada acesso a esta ficha é registrado.</p>
             </section>
           )}
-          {p.data && <section className="card"><ConsentimentoPaciente patientId={id} /></section>}
-          <PageHead title="Prontuário"><button className="primary sm" onClick={() => setAdding(true)}><Icon name="plus" size={16} />Novo registro</button></PageHead>
-          <section className="card">
+          <div className="seg2" role="tablist" aria-label="Seções da ficha">
+            {([['prontuario', 'Prontuário'], ['autorizacoes', 'Autorizações'], ['comprovantes', 'Comprovantes']] as const).map(([k, l]) => (
+              <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>{l}</button>
+            ))}
+          </div>
+          {tab === 'autorizacoes' && p.data && <section className="card"><ConsentimentoPaciente patientId={id} /></section>}
+          {tab === 'prontuario' && <PageHead title="Prontuário"><button className="primary sm" onClick={() => setAdding(true)}><Icon name="plus" size={16} />Novo registro</button></PageHead>}
+          {tab === 'prontuario' && <section className="card">
             <Loading error={recs.error} ready={!!recs.data} />
             {recs.data?.length === 0 && <Empty icon="pulse" title="Nenhum registro ainda" text="Alergias e evolução do paciente aparecem aqui, do mais recente ao mais antigo." />}
             <ul className="timeline">{recs.data?.map((r) => (
@@ -323,8 +331,8 @@ function PatientDetail({ id, onClose, session, onFinish }: { id: string; onClose
               </li>
             ))}</ul>
             {ai.data && ai.data.length > 0 && <p className="muted note">Julia consultou este prontuário em {new Date(ai.data[0].createdAt).toLocaleString('pt-BR')}{ai.data.length > 1 ? ` (${ai.data.length} consultas)` : ''}.</p>}
-          </section>
-          {id && <ComprovantesDoPaciente patientId={id} />}
+          </section>}
+          {tab === 'comprovantes' && id && <ComprovantesDoPaciente patientId={id} />}
           {adding && (
             <Sheet title="Novo registro clínico" onClose={() => setAdding(false)}>
               <AddForm label="Salvar registro" onSubmit={async (v) => { await api(`/patients/${id}/records`, { method: 'POST', json: v }); recs.reload(); setAdding(false); toast('Registro salvo'); }} fields={[

@@ -136,8 +136,9 @@ export function AtencaoLista({ items, hidden, onAction }: { items: AttItem[]; hi
             <h3 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase', letterSpacing: '.04em', color: u === 'high' ? 'var(--warn)' : 'var(--muted)' }}>{GROUP[u]}</h3>
             <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8 }}>
               {group.map((it) => (
-                <li key={it.id} style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 10, display: 'grid', gap: 6 }}>
+                <li key={it.id} className={`attn-item ${u}`} style={{ borderRadius: 16, padding: 12, display: 'grid', gap: 6 }}>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                    <span className={`urg ${u}`}>{u === 'high' ? 'Alta' : u === 'medium' ? 'Média' : 'Baixa'}</span>
                     <b className="grow" style={{ minWidth: 0 }}>{it.title}</b>
                     <span className={u === 'high' ? 'pill warn' : 'pill'}>{OWNER[it.owner]}</span>
                   </div>

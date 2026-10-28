@@ -127,8 +127,8 @@ function Summary({ sum, flow, banks, recv, pay, bump, goTab }: { sum: ReturnType
                       <YAxis tickLine={false} axisLine={false} width={44} tick={{ fill: 'var(--muted)', fontSize: 12 }} tickFormatter={(v) => (v >= 1000 ? `${v / 1000}k` : v)} />
                       <Tooltip cursor={{ fill: 'var(--line)', opacity: 0.4 }} formatter={(v: number, n: string) => [hidden ? '••••' : brl(v), n === 'income' ? 'Entradas' : 'Saídas']}
                         contentStyle={{ background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--ink)' }} />
-                      <Bar dataKey="income" fill="var(--c1)" radius={[5, 5, 0, 0]} maxBarSize={22} />
-                      <Bar dataKey="expense" fill="var(--out)" radius={[5, 5, 0, 0]} maxBarSize={22} />
+                      <Bar dataKey="income" fill="var(--c1)" radius={[8, 8, 8, 8]} maxBarSize={22} />
+                      <Bar dataKey="expense" fill="var(--out)" radius={[8, 8, 8, 8]} maxBarSize={22} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -451,7 +451,7 @@ function Dre({ dre }: { dre: ReturnType<typeof useLoad<any>> }) {
               <div className="donut-row">
                 <div className="donut" role="img" aria-label="Divisão das despesas por grupo">
                   <ResponsiveContainer width="100%" height={168}>
-                    <PieChart><Pie data={parts} dataKey="value" nameKey="name" innerRadius="68%" outerRadius="100%" paddingAngle={parts.length > 1 ? 2 : 0} stroke="none" isAnimationActive={false}>
+                    <PieChart><Pie data={parts} dataKey="value" nameKey="name" innerRadius="66%" outerRadius="100%" cornerRadius={8} paddingAngle={parts.length > 1 ? 4 : 0} stroke="none" isAnimationActive={false}>
                       {parts.map((p, i) => <Cell key={p.name} fill={`var(--c${(i % 6) + 1})`} />)}</Pie></PieChart>
                   </ResponsiveContainer>
                   <div className="donut-total"><strong>{mask(brl(sum), hidden).replace('R$ ', '')}</strong><span>em saídas</span></div>
