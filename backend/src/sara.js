@@ -10,7 +10,7 @@ import { getRevenueByMonth, getTopProcedures, getFinanceSummary, getCashFlow, ge
 import * as D from './sara_queries.js';
 
 const defaultClient = { generate };
-class ToolError extends Error {} // mensagem segura para o modelo/usuário; qualquer outro erro vira texto genérico
+export class ToolError extends Error {} // mensagem segura para o modelo/usuário; qualquer outro erro vira texto genérico
 const MANAGERS = ['owner', 'manager'];
 const ALL = ['owner', 'manager', 'professional', 'reception'];
 const CLINICAL = ['owner', 'manager', 'professional']; // mesmo critério de prontuario.js para o CPF
@@ -179,7 +179,7 @@ export async function availableSlots(clinicId, { date: d, durationMin = 30, prof
   }
   return { date: d, durationMin, slots };
 }
-async function createAppointment(c, a) {
+export async function createAppointment(c, a) {
   const dur = a.durationMin ?? 30;
   const start = new Date(a.startsAt), end = new Date(start.getTime() + dur * 60_000);
   const local = localOf(start);
@@ -222,9 +222,10 @@ async function compareMonths(c, { months: n }) {
   }
   return out.map((r, i) => (i && out[i - 1].income ? { ...r, variacao_receita_pct: +(((r.income - out[i - 1].income) / out[i - 1].income) * 100).toFixed(1) } : r));
 }
-async function rescheduleAppointment(c, a) {
+export async function rescheduleAppointment(c, a) {
   const [ap] = await q(`SELECT id, professional_id, starts_at, ends_at FROM appointments
-                        WHERE id=$1 AND clinic_id=$2 AND status IN ('scheduled','confirmed')`, [a.appointmentId, c.clinicId]);
+                        WHERE id=$1 AND clinic_id=$2 AND status IN ('scheduled','confirmed') AND ($3::uuid IS NULL OR patient_id=$3)`,
+    [a.appointmentId, c.clinicId, c.patientId ?? null]);
   if (!ap) throw new ToolError('agendamento não encontrado ou já encerrado');
   const dur = Math.round((new Date(ap.ends_at) - new Date(ap.starts_at)) / 60_000);
   const start = new Date(a.startsAt), end = new Date(start.getTime() + dur * 60_000), local = localOf(start);
@@ -240,9 +241,10 @@ async function rescheduleAppointment(c, a) {
   pushAppointment(row.id).catch(() => {});
   return { ok: true, appointmentId: row.id, novo_inicio: local };
 }
-async function cancelAppointment(c, a) {
+export async function cancelAppointment(c, a) {
   const [row] = await q(`UPDATE appointments SET status='canceled', updated_at=now()
-                         WHERE id=$1 AND clinic_id=$2 AND status IN ('scheduled','confirmed') RETURNING id`, [a.appointmentId, c.clinicId]);
+                         WHERE id=$1 AND clinic_id=$2 AND status IN ('scheduled','confirmed') AND ($3::uuid IS NULL OR patient_id=$3)
+                         RETURNING id`, [a.appointmentId, c.clinicId, c.patientId ?? null]);
   if (!row) throw new ToolError('agendamento não encontrado ou já encerrado');
   pushAppointment(row.id).catch(() => {});
   return { ok: true, appointmentId: row.id, status: 'canceled' };
@@ -251,9 +253,11 @@ async function cancelAppointment(c, a) {
 // ---------- limite de custo: orçamento mensal de tokens (a API do Gemini não tem teto próprio) ----------
 const num = (v, d) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : d);
 export async function checkBudget(clinicId) {
-  const [u] = await q(`SELECT coalesce(sum(tokens_in + tokens_out) FILTER (WHERE clinic_id=$1), 0)::bigint AS clinic,
-                              coalesce(sum(tokens_in + tokens_out), 0)::bigint AS total
-                       FROM sara_messages WHERE created_at >= date_trunc('month', now())`, [clinicId]);
+  await ensureSchema();
+  const [u] = await q(`SELECT coalesce(sum(t) FILTER (WHERE clinic_id=$1), 0)::bigint AS clinic, coalesce(sum(t), 0)::bigint AS total
+                       FROM (SELECT clinic_id, coalesce(tokens_in, 0) + coalesce(tokens_out, 0) AS t FROM sara_messages WHERE created_at >= date_trunc('month', now())
+                             UNION ALL
+                             SELECT clinic_id, coalesce(tokens_in, 0) + coalesce(tokens_out, 0) FROM wa_messages WHERE created_at >= date_trunc('month', now())) u`, [clinicId]);
   if (Number(u.clinic) >= num(process.env.GEMINI_CLINIC_MONTHLY_TOKENS, 1_000_000)) throw new BudgetError('clínica');
   if (Number(u.total) >= num(process.env.GEMINI_TOTAL_MONTHLY_TOKENS, 5_000_000)) throw new BudgetError('total');
 }

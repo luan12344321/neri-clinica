@@ -23,6 +23,13 @@ const STEPS = [
             ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now()` },
 ];
 
+const tbl = (name) => `SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name='${name}'`;
+STEPS.push(
+  { has: col('clinics', 'whatsapp_verify_token'), sql: "ALTER TABLE clinics\n  ADD COLUMN IF NOT EXISTS whatsapp_enabled boolean NOT NULL DEFAULT false,\n  ADD COLUMN IF NOT EXISTS whatsapp_number text,\n  ADD COLUMN IF NOT EXISTS whatsapp_phone_id text,\n  ADD COLUMN IF NOT EXISTS whatsapp_token_enc text,      -- cifrado (AES-256-GCM), nunca devolvido pela API\n  ADD COLUMN IF NOT EXISTS whatsapp_secret_enc text,     -- segredo do app da Meta (valida a assinatura do webhook), cifrado\n  ADD COLUMN IF NOT EXISTS whatsapp_verify_token text;\nCREATE UNIQUE INDEX IF NOT EXISTS clinics_wa_phone_id ON clinics (whatsapp_phone_id) WHERE whatsapp_phone_id IS NOT NULL;\n" },
+  { has: tbl('wa_messages'), sql: "CREATE TABLE IF NOT EXISTS wa_messages (\n  id bigserial PRIMARY KEY,\n  clinic_id uuid NOT NULL REFERENCES clinics ON DELETE CASCADE,\n  contact text NOT NULL,                     -- telefone do cliente (só dígitos)\n  direction text NOT NULL CHECK (direction IN ('in','out')),\n  wa_message_id text,                        -- id da Meta: evita responder duas vezes ao mesmo reenvio\n  body text NOT NULL,\n  tokens_in int, tokens_out int,             -- uso do modelo (entra no orçamento mensal)\n  created_at timestamptz NOT NULL DEFAULT now()\n);\nCREATE UNIQUE INDEX IF NOT EXISTS wa_messages_dedupe ON wa_messages (clinic_id, wa_message_id) WHERE wa_message_id IS NOT NULL;\nCREATE INDEX IF NOT EXISTS wa_messages_contact ON wa_messages (clinic_id, contact, id DESC);\n" },
+  { has: tbl('wa_contacts'), sql: "CREATE TABLE IF NOT EXISTS wa_contacts (\n  clinic_id uuid NOT NULL REFERENCES clinics ON DELETE CASCADE,\n  contact text NOT NULL,\n  display_name text,\n  human_until timestamptz,                   -- enquanto no futuro, a Julia não responde (a equipe assumiu)\n  handoff_reason text,\n  PRIMARY KEY (clinic_id, contact)\n);\n" },
+);
+
 let ready;
 export const ensureSchema = () => (ready ??= (async () => {
   for (const s of STEPS) if (!(await q(s.has)).length) await q(s.sql);
