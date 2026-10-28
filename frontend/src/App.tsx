@@ -6,11 +6,13 @@ import { Icon, type IconName } from './Icon';
 import { AppointmentSheet, Cadastros, NewAppointment, RescheduleSheet, type Focus, type Section } from './Cadastros';
 import { ApptSheet, DayTimeline, ageOf } from './Timeline';
 import { ConcluirAtendimento } from './Atendimento';
+import { AtencaoLista, RetornosDoDia, type AttItem } from './RetornosDoDia';
 import { useHours } from './hours';
 import { Avatar, Empty, ErrorBoundary, EyeToggle, ListSkeleton, RoleProvider, ToastProvider, mask, useHideValues, useRole } from './ui';
 import { Settings, type Me } from './Settings';
 import { PresenceButton } from './Presence';
 import { Finance, RecentTransactions, type Bank, type FinTab } from './Finance';
+import PainelCiclo from './PainelCiclo';
 import { BottomNav, InstallPill, QuickSheet, Splash, type QuickAction } from './Chrome';
 
 type View = 'inicio' | 'agenda' | 'financeiro' | 'estoque' | 'sara' | 'pacientes' | 'procedimentos' | 'produtos' | 'mensagens' | 'config';
@@ -201,6 +203,7 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
   onStart: (patientId: string, appt: any | null) => void;
 }) {
   const dash = useLoad<any>('/dashboard');
+  const att = useLoad<{ items: AttItem[] }>('/attention');
   const sum = useLoad<any>(money ? `/finance/summary?month=${thisMonth()}` : null);
   const recv = useLoad<any[]>(money ? '/finance/receivables' : null);
   const pay = useLoad<any[]>(money ? '/finance/payables' : null);
@@ -217,7 +220,7 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
   async function complete(id: string) {
     if (isClinical) { setOpen(null); setConcluding(id); return; } // owner/gerente/profissional: folha com baixa de estoque confirmada
     setBusyId(id);
-    try { await api(`/appointments/${id}/complete`, { method: 'POST', json: {} }); setOpen(null); dash.reload(); sum.reload(); recv.reload(); banks.reload(); setBump((b) => b + 1); }
+    try { await api(`/appointments/${id}/complete`, { method: 'POST', json: {} }); setOpen(null); dash.reload(); att.reload(); sum.reload(); recv.reload(); banks.reload(); setBump((b) => b + 1); }
     finally { setBusyId(''); }
   }
   const d = dash.data, s = sum.data;
@@ -236,6 +239,16 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
   const duePay = (pay.data ?? []).filter((t) => String(t.due_date).slice(0, 10) <= todayStr);
   const birthdays: { id: string; full_name: string }[] = d?.birthdays ?? [];
   const goAgenda = () => document.getElementById('agenda-hoje')?.scrollIntoView({ behavior: 'smooth' });
+  // Ações da lista "Precisa de atenção". "Encaminhar" não tem tela própria: leva à agenda do dia.
+  const onAttnAction = (kind: string) => {
+    if (kind === 'register') { if (late[0]) complete(late[0].id); else goAgenda(); }
+    else if (kind === 'reschedule') { if (late[0]) setMoving(late[0]); else goAgenda(); }
+    else if (kind === 'check_status' || kind === 'forward') goAgenda();
+    else if (kind === 'open_returns') document.getElementById('retornos-do-dia')?.scrollIntoView({ behavior: 'smooth' });
+    else if (kind === 'open_payables' || kind === 'open_receivables') go('financeiro', 'contas');
+    else if (kind === 'open_lots' || kind === 'open_restock') go('estoque');
+    else if (kind === 'open_birthdays') go('pacientes');
+  };
 
   const todo: Todo[] = [
     ...(late.length ? [{ icon: 'alert' as IconName, tone: 'bad' as const, text: `${late.length} atendimento(s) passaram do horário sem ser concluídos`, hint: late.map((a) => `${timeOf(a)} ${a.patient}`).join(' · '), run: goAgenda }] : []),
@@ -263,7 +276,7 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
   const kpis: { icon: IconName; label: string; value: string; hot?: boolean; eye?: boolean }[] = [
     { icon: 'users', label: 'Pacientes hoje', value: String(patientsToday) },
     { icon: 'check', label: 'Atendimentos concluídos', value: `${doneToday} de ${today.length}` },
-    { icon: 'alert', label: 'Pendências', value: String(todo.length), hot: todo.length > 0 },
+    { icon: 'alert', label: 'Pendências', value: String(att.data ? att.data.items.length : todo.length), hot: (att.data ? att.data.items.length : todo.length) > 0 },
     ...(money ? [{ icon: 'wallet' as IconName, label: 'Faturamento do dia', value: mask(brl(d?.todayRevenue ?? 0), hidden), eye: true }] : []),
   ];
   const quick: { icon: IconName; label: string; run: () => void }[] = [
@@ -324,7 +337,14 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
             </section>
 
             <aside className="g-side">
-            {todo.length > 0 ? (
+            {att.data ? (
+              <section className="card attn g-attn" id="pendencias">
+                <div className="attn-head"><h2>Precisa de atenção</h2><span className="badge" aria-label={`${att.data.items.length} pendência(s)`}>{att.data.items.length}</span></div>
+                {att.data.items.length === 0
+                  ? <p className="muted">Tudo em dia. Nada pendente por enquanto.</p>
+                  : <AtencaoLista items={att.data.items} hidden={hidden} onAction={onAttnAction} />}
+              </section>
+            ) : todo.length > 0 ? (
               <section className="card attn g-attn" id="pendencias">
                 <div className="attn-head"><h2>Precisa de atenção</h2><span className="badge" aria-label={`${todo.length} pendência(s)`}>{todo.length}</span></div>
                 <ul className="todo">{todo.map((t) => (
@@ -351,6 +371,8 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
               </div>
             </section>
             </aside>
+
+            <div className="span-all"><RetornosDoDia /></div>
 
             <DayTimeline appts={today} hours={hours} onOpen={setOpen} onBook={onBook} onSeeAll={() => go('agenda')} />
 
@@ -393,6 +415,7 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
             </section>
           )}
 
+          {money && <PainelCiclo />}
           {money && <RecentTransactions limit={5} reloadKey={bump} onSeeAll={() => go('financeiro', 'contas')} />}
 
           {money && (
@@ -444,8 +467,8 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
       {open && <ApptSheet appt={open} clinical={isClinical} busy={busyId === open.id} onClose={() => setOpen(null)}
         onStart={() => { const a = open; setOpen(null); onStart(a.patient_id, a); }} onChart={() => { const a = open; setOpen(null); onStart(a.patient_id, null); }}
         onComplete={() => complete(open.id)} onMove={() => { setMoving(open); setOpen(null); }} />}
-      {concluding && <ConcluirAtendimento appointmentId={concluding} onClose={() => setConcluding('')} onDone={() => { dash.reload(); sum.reload(); recv.reload(); banks.reload(); setBump((b) => b + 1); }} />}
-      {moving && <RescheduleSheet appt={moving} onClose={() => setMoving(null)} onDone={() => { setMoving(null); dash.reload(); }} />}
+      {concluding && <ConcluirAtendimento appointmentId={concluding} onClose={() => setConcluding('')} onDone={() => { dash.reload(); att.reload(); sum.reload(); recv.reload(); banks.reload(); setBump((b) => b + 1); }} />}
+      {moving && <RescheduleSheet appt={moving} onClose={() => setMoving(null)} onDone={() => { setMoving(null); dash.reload(); att.reload(); }} />}
     </div>
   );
 }
