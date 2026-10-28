@@ -56,6 +56,7 @@ await app.register((await import('./banks.js')).default);
 await app.register((await import('./payments.js')).default);
 await app.register((await import('./hours.js')).default);
 await app.register((await import('./prontuario.js')).default);
+await app.register((await import('./whatsapp.js')).default);
 const clinic = (req) => req.user.clinicId;
 
 // ---------- Auth ----------

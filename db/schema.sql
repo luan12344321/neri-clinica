@@ -228,6 +228,37 @@ CREATE TABLE sara_messages (
 );
 CREATE INDEX ON sara_messages (conversation_id, id);
 
+ALTER TABLE clinics
+  ADD COLUMN IF NOT EXISTS whatsapp_enabled boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS whatsapp_number text,
+  ADD COLUMN IF NOT EXISTS whatsapp_phone_id text,
+  ADD COLUMN IF NOT EXISTS whatsapp_token_enc text,      -- cifrado (AES-256-GCM), nunca devolvido pela API
+  ADD COLUMN IF NOT EXISTS whatsapp_secret_enc text,     -- segredo do app da Meta (valida a assinatura do webhook), cifrado
+  ADD COLUMN IF NOT EXISTS whatsapp_verify_token text;
+CREATE UNIQUE INDEX IF NOT EXISTS clinics_wa_phone_id ON clinics (whatsapp_phone_id) WHERE whatsapp_phone_id IS NOT NULL;
+
+-- ===== WhatsApp (atendimento da Julia aos clientes) =====
+CREATE TABLE IF NOT EXISTS wa_messages (
+  id bigserial PRIMARY KEY,
+  clinic_id uuid NOT NULL REFERENCES clinics ON DELETE CASCADE,
+  contact text NOT NULL,                     -- telefone do cliente (só dígitos)
+  direction text NOT NULL CHECK (direction IN ('in','out')),
+  wa_message_id text,                        -- id da Meta: evita responder duas vezes ao mesmo reenvio
+  body text NOT NULL,
+  tokens_in int, tokens_out int,             -- uso do modelo (entra no orçamento mensal)
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS wa_messages_dedupe ON wa_messages (clinic_id, wa_message_id) WHERE wa_message_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS wa_messages_contact ON wa_messages (clinic_id, contact, id DESC);
+CREATE TABLE IF NOT EXISTS wa_contacts (
+  clinic_id uuid NOT NULL REFERENCES clinics ON DELETE CASCADE,
+  contact text NOT NULL,
+  display_name text,
+  human_until timestamptz,                   -- enquanto no futuro, a Julia não responde (a equipe assumiu)
+  handoff_reason text,
+  PRIMARY KEY (clinic_id, contact)
+);
+
 CREATE TABLE audit_log (                     -- LGPD: quem acessou/alterou o quê
   id bigserial PRIMARY KEY,
   clinic_id uuid NOT NULL,

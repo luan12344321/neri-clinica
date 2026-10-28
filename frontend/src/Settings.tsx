@@ -28,6 +28,7 @@ export function Settings({ me }: { me: Me | null }) {
       {isOwner && <Team />}
       {isOwner && <AssistantCard />}
       {isOwner && <PaymentsCard />}
+      {isOwner && <WhatsAppCard />}
       <footer className="credit span-all"><span>Desenvolvido por</span><img src="/neri-logo.png" alt="NERI Design & Web" /></footer>
     </div>
   );
@@ -206,6 +207,97 @@ function PaymentsCard() {
       {a?.configured && <div className="actions"><button className="ghost" disabled={state === 'busy'} onClick={test}>{state === 'busy' ? 'Testando…' : 'Testar conexão'}</button></div>}
       {state === 'ok' && <p className="ok-text" role="status"><Icon name="check" size={16} /> Conexão com o Asaas funcionando.</p>}
       {state === 'fail' && <p role="alert" className="err">Não foi possível conectar ao Asaas{detail ? `: ${detail}` : '. Confira a chave de API e o ambiente (teste ou produção).'}</p>}
+    </section>
+  );
+}
+
+// ---------- WhatsApp: a Julia atende os clientes ----------
+type WaConfig = { enabled: boolean; number: string; phoneId: string; tokenSet: boolean; secretSet: boolean; verifyToken: string | null };
+type WaWaiting = { contact: string; name: string | null; reason: string | null; last_message: string | null };
+const maskPhone = (p: string) => (p.length > 4 ? `…${p.slice(-4)}` : p);
+
+function WhatsAppCard() {
+  const cfg = useLoad<WaConfig>('/integrations/whatsapp');
+  const waiting = useLoad<WaWaiting[]>('/integrations/whatsapp/waiting', 30000);
+  const toast = useToast();
+  const [form, setForm] = useState({ number: '', phoneId: '', token: '', appSecret: '', enabled: false });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [test, setTest] = useState<{ state: 'idle' | 'busy' | 'ok' | 'fail'; detail: string }>({ state: 'idle', detail: '' });
+  const [copied, setCopied] = useState('');
+  const url = `${location.origin}/api/webhooks/whatsapp`;
+  const c = cfg.data;
+  useEffect(() => { if (c) setForm((f) => ({ ...f, number: c.number, phoneId: c.phoneId, enabled: c.enabled })); }, [c]);
+  const set = (k: keyof typeof form, v: string | boolean) => setForm((f) => ({ ...f, [k]: v }));
+  async function save(e: React.FormEvent) {
+    e.preventDefault(); setBusy(true); setErr('');
+    try {
+      await api('/integrations/whatsapp', { method: 'PUT', json: { number: form.number, phoneId: form.phoneId, enabled: form.enabled,
+        ...(form.token ? { token: form.token } : {}), ...(form.appSecret ? { appSecret: form.appSecret } : {}) } });
+      setForm((f) => ({ ...f, token: '', appSecret: '' }));
+      cfg.reload(); toast('WhatsApp salvo');
+    } catch (e2) { setErr(e2 instanceof ApiError && e2.detail ? e2.detail : e2 instanceof ApiError && e2.status === 400 ? 'Confira o número (com DDD) e o Phone Number ID.' : 'Não foi possível salvar agora.'); }
+    finally { setBusy(false); }
+  }
+  async function runTest() {
+    setTest({ state: 'busy', detail: '' });
+    try { const r = await api<{ number: string | null }>('/integrations/whatsapp/test', { method: 'POST', json: {} }); setTest({ state: 'ok', detail: r.number ?? '' }); }
+    catch (e2) { setTest({ state: 'fail', detail: e2 instanceof ApiError && e2.detail ? e2.detail : '' }); }
+  }
+  async function copy(key: string, text: string) { try { await navigator.clipboard.writeText(text); setCopied(key); setTimeout(() => setCopied(''), 2000); } catch { /* sem permissão */ } }
+  async function resume(contact: string) { try { await api(`/integrations/whatsapp/contacts/${contact}/resume`, { method: 'POST', json: {} }); waiting.reload(); toast('A Julia voltou a atender'); } catch { toast('Não foi possível agora'); } }
+  const configured = !!c?.tokenSet && !!c?.secretSet && !!c?.phoneId;
+  return (
+    <section className="card span-all">
+      <div className="between"><h2>WhatsApp da clínica</h2>{c && <span className={`pill ${c.enabled ? 'ok' : 'warn'}`}>{c.enabled ? 'Julia atendendo' : 'Desligado'}</span>}</div>
+      <p className="muted">Cadastre o número que os clientes vão usar. A Julia responde as mensagens a qualquer hora, tira dúvidas, agenda, remarca e cancela consultas, e chama a equipe quando o assunto é com vocês.</p>
+      {!configured && (
+        <ol className="steps">
+          <li>Na Meta (WhatsApp Business Platform), crie o app e registre um número que <b>não esteja em uso</b> no WhatsApp comum.</li>
+          <li>Copie o <b>Phone Number ID</b>, gere um <b>token de acesso permanente</b> e pegue o <b>segredo do app</b> (App Secret). Cole nos campos abaixo e salve.</li>
+          <li>Na Meta, em Webhooks, cadastre o endereço e o token de verificação mostrados aqui e assine o campo <b>messages</b>.</li>
+        </ol>
+      )}
+      <form onSubmit={save} className="form">
+        <label className="form-label">Número do WhatsApp (com DDD) <input inputMode="tel" required value={form.number} onChange={(e) => set('number', e.target.value)} placeholder="+55 11 90000-0000" /></label>
+        <label className="form-label">Phone Number ID (da Meta) <input inputMode="numeric" required value={form.phoneId} onChange={(e) => set('phoneId', e.target.value)} autoComplete="off" /></label>
+        <label className="form-label">Token de acesso {c?.tokenSet && <small>(salvo; preencha só para trocar)</small>}
+          <input type="password" value={form.token} onChange={(e) => set('token', e.target.value)} autoComplete="new-password" placeholder={c?.tokenSet ? '••••••••••••' : ''} /></label>
+        <label className="form-label">Segredo do app (App Secret) {c?.secretSet && <small>(salvo; preencha só para trocar)</small>}
+          <input type="password" value={form.appSecret} onChange={(e) => set('appSecret', e.target.value)} autoComplete="new-password" placeholder={c?.secretSet ? '••••••••••••' : ''} /></label>
+        <label className="check"><input type="checkbox" checked={form.enabled} onChange={(e) => set('enabled', e.target.checked)} /> Ligar o atendimento da Julia neste número</label>
+        {err && <p role="alert" className="err">{err}</p>}
+        <div className="actions">
+          <button className="primary" disabled={busy}>{busy ? 'Salvando…' : 'Salvar'}</button>
+          {configured && <button type="button" className="ghost" disabled={test.state === 'busy'} onClick={runTest}>{test.state === 'busy' ? 'Testando…' : 'Testar conexão'}</button>}
+        </div>
+      </form>
+      {test.state === 'ok' && <p className="ok-text" role="status"><Icon name="check" size={16} /> Conectado à Meta{test.detail ? ` · ${test.detail}` : ''}.</p>}
+      {test.state === 'fail' && <p role="alert" className="err">Não foi possível conectar{test.detail ? `: ${test.detail}` : '. Confira o Phone Number ID e o token.'}</p>}
+      {c?.verifyToken && (
+        <div className="form" style={{ marginTop: 16 }}>
+          <label className="form-label">Endereço do webhook (cole na Meta)
+            <span className="pw"><input readOnly value={url} onFocus={(e) => e.currentTarget.select()} /><button type="button" aria-label="Copiar endereço" onClick={() => copy('url', url)}><Icon name={copied === 'url' ? 'check' : 'copy'} size={20} /></button></span>
+          </label>
+          <label className="form-label">Token de verificação (cole na Meta)
+            <span className="pw"><input readOnly value={c.verifyToken} onFocus={(e) => e.currentTarget.select()} /><button type="button" aria-label="Copiar token" onClick={() => copy('tok', c.verifyToken!)}><Icon name={copied === 'tok' ? 'check' : 'copy'} size={20} /></button></span>
+          </label>
+        </div>
+      )}
+      {!!waiting.data?.length && (
+        <div style={{ marginTop: 20 }}>
+          <h3>Conversas esperando a equipe</h3>
+          <p className="muted">A Julia ficou quieta nestas conversas. Responda pelo WhatsApp e, quando terminar, devolva para ela.</p>
+          <ul className="rows">
+            {waiting.data.map((w) => (
+              <li key={w.contact} className="between">
+                <span><b>{w.name || maskPhone(w.contact)}</b> <small className="muted">{w.reason}</small><br /><small className="muted">{w.last_message}</small></span>
+                <button className="ghost" onClick={() => resume(w.contact)}>Devolver para a Julia</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
   );
 }
