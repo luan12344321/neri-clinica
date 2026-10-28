@@ -8,7 +8,7 @@ const id = z.guid();
 export default async function cadastros(app) {
   const read = { onRequest: [app.auth] };
   const write = { onRequest: [app.auth, async (req, reply) => {
-    if (!['owner', 'manager'].includes(req.user.role)) reply.code(403).send({ error: 'forbidden' });
+    if (!['owner', 'manager'].includes(req.user.role)) return reply.code(403).send({ error: 'forbidden' });
   }] };
   const cid = (req) => req.user.clinicId;
 
@@ -22,7 +22,7 @@ export default async function cadastros(app) {
   });
 
   // ---- Categorias financeiras ----
-  app.get('/categories', read, (req) => q('SELECT * FROM categories WHERE clinic_id=$1 ORDER BY name', [cid(req)]));
+  app.get('/categories', write, (req) => q('SELECT * FROM categories WHERE clinic_id=$1 ORDER BY name', [cid(req)]));
   app.post('/categories', write, async (req, reply) => {
     const b = z.object({ name: z.string().min(2), kind: z.enum(['income', 'expense']),
       dreGroup: z.enum(['receita_bruta', 'deducoes', 'custos_variaveis', 'despesas_operacionais', 'despesas_financeiras', 'impostos_lucro']) }).parse(req.body);
@@ -45,7 +45,7 @@ export default async function cadastros(app) {
   });
 
   // ---- Estoque ----
-  app.get('/products', read, (req) => q('SELECT * FROM products WHERE clinic_id=$1 ORDER BY name', [cid(req)]));
+  app.get('/products', write, (req) => q('SELECT * FROM products WHERE clinic_id=$1 ORDER BY name', [cid(req)]));
   app.post('/products', write, async (req, reply) => {
     const b = z.object({ name: z.string().min(2), unit: z.string().default('un'), minQuantity: money, targetQuantity: money,
       unitCost: money.optional(), expiresAt: z.string().date().optional() }).parse(req.body);
@@ -93,7 +93,7 @@ export default async function cadastros(app) {
   });
 
   // ---- Automação: templates e regras ----
-  app.get('/automation', read, async (req) => ({
+  app.get('/automation', write, async (req) => ({
     templates: await q('SELECT * FROM message_templates WHERE clinic_id=$1', [cid(req)]),
     followupRules: await q('SELECT * FROM followup_rules WHERE clinic_id=$1', [cid(req)]) }));
   app.post('/automation/templates', write, async (req, reply) => {

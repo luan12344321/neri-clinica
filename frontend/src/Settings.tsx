@@ -13,7 +13,7 @@ type Member = { id: string; name: string; email: string; role: Role; revoked: bo
 const ROLE_HINT: Record<Exclude<Role, 'owner'>, string> = {
   manager: 'Tudo, menos gerenciar a equipe: financeiro, estoque, cadastros, mensagens e a Julia.',
   professional: 'Agenda, pacientes e prontuário. Não vê o financeiro.',
-  reception: 'Agenda e cadastro de pacientes. Não vê financeiro nem prontuário.',
+  reception: 'Agenda, cadastro de pacientes, estoque e a Julia (agenda e estoque). Sem acesso a financeiro, produtos, mensagens, CPF, prontuário e equipe.',
 };
 const ROLE_OPTIONS = (Object.keys(ROLE_HINT) as (keyof typeof ROLE_HINT)[]).map((value) => ({ value, label: ROLE_LABEL[value] }));
 
@@ -328,7 +328,7 @@ function HoursCard() {
   return (
     <section className="card hours">
       <div className="between"><h2>Horário de atendimento</h2>{isDefault && <span className="pill">Padrão</span>}</div>
-      <p className="muted">A agenda só oferece estes horários para agendar. Cada dia pode ter mais de uma faixa (por exemplo, manhã e tarde com o intervalo do almoço).</p>
+      <p className="muted">A agenda só oferece estes horários. Cada dia aceita até 3 faixas (ex.: manhã e tarde).</p>
       <ul className="hours-list">
         {DAYS.map(([d, label]) => {
           const faixas = draft[d] ?? [];
@@ -337,19 +337,19 @@ function HoursCard() {
             <li key={d} className={!validDay(faixas) ? 'bad' : ''}>
               <label className="day-switch">
                 <input type="checkbox" checked={open} onChange={(e) => set(d, e.target.checked ? [['08:00', '11:00'], ['13:00', '18:00']] : [])} />
-                <b>{label}</b>{!open && <span className="muted">fechado</span>}
+                <b title={label}>{label.slice(0, 3)}</b>{!open && <span className="muted">fechado</span>}
               </label>
               {open && (
                 <div className="faixas">
                   {faixas.map(([s, e], i) => (
                     <div key={i} className="faixa">
                       <select aria-label={`${label}: início da faixa ${i + 1}`} value={s} onChange={(ev) => set(d, faixas.map((f, j) => (j === i ? [ev.target.value, f[1]] : f)) as [string, string][])}>{TIMES.map((x) => <option key={x}>{x}</option>)}</select>
-                      <span>às</span>
+                      <span aria-hidden="true">–</span>
                       <select aria-label={`${label}: fim da faixa ${i + 1}`} value={e} onChange={(ev) => set(d, faixas.map((f, j) => (j === i ? [f[0], ev.target.value] : f)) as [string, string][])}>{TIMES.map((x) => <option key={x}>{x}</option>)}</select>
                       <button className="icon-btn" aria-label={`Remover faixa ${i + 1} de ${label}`} onClick={() => set(d, faixas.filter((_, j) => j !== i))}><Icon name="close" size={18} /></button>
                     </div>
                   ))}
-                  {faixas.length < 3 && <button className="link small" onClick={() => set(d, [...faixas, ['14:00', '18:00']])}>+ Adicionar faixa</button>}
+                  {faixas.length < 3 && <button className="icon-btn add" aria-label={`Adicionar faixa em ${label}`} title="Adicionar faixa" onClick={() => set(d, [...faixas, ['14:00', '18:00']])}><Icon name="plus" size={16} /></button>}
                 </div>
               )}
             </li>

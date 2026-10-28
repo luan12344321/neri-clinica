@@ -566,16 +566,19 @@ button.ghost.danger { color: var(--neg); border-color: color-mix(in srgb, var(--
 .time-group { display: grid; gap: 6px; }
 .time-cap { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
 .link.small { font-size: 13px; min-height: 28px; }
-.hours-list { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 4px; }
-.hours-list li { padding: 10px 0; border-top: 1px solid var(--line); display: grid; gap: 8px; }
+/* Horário de atendimento: compacto, um dia por linha com as faixas lado a lado */
+.hours-list { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 0; }
+.hours-list li { padding: 5px 0; border-top: 1px solid var(--line); display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; }
 .hours-list li:first-child { border-top: 0; }
-.hours-list li.bad { background: var(--warn-soft); border-radius: 12px; padding: 10px; }
-.day-switch { display: flex; align-items: center; gap: 10px; color: var(--ink); font-size: 15px; }
-.day-switch input { width: 22px; min-height: 22px; accent-color: var(--hero); }
-.faixas { display: grid; gap: 8px; padding-left: 32px; justify-items: start; }
-.faixa { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.faixa select { width: auto; min-width: 96px; }
-@media (max-width: 480px) { .faixas { padding-left: 0; } }
+.hours-list li.bad { background: var(--warn-soft); border-radius: 12px; padding: 6px 10px; }
+.day-switch { display: flex; align-items: center; gap: 4px; color: var(--ink); font-size: 14px; flex: 0 0 58px; min-width: 0; }
+.day-switch input { width: 20px; min-height: 20px; accent-color: var(--hero); flex: none; }
+.day-switch .muted { font-size: 13px; }
+.faixas { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; flex: 1 1 auto; }
+.faixa { display: flex; align-items: center; gap: 1px; flex-wrap: nowrap; font-size: 13px; color: var(--muted); }
+.faixa select { appearance: none; -webkit-appearance: none; background-image: none; width: 40px; min-width: 0; min-height: 32px; padding: 2px 0; font-size: 13px; text-align: center; text-align-last: center; font-size: 14px; border-radius: 10px; }
+.faixa .icon-btn, .faixas .icon-btn.add { width: 22px; height: 22px; min-height: 22px; padding: 0; }
+.faixas .icon-btn.add { color: var(--hero); }
 
 
 .tl-gap { position: absolute; left: 48px; right: 0; display: grid; place-items: center; border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); background: repeating-linear-gradient(135deg, #f0eee6 0 8px, #f6f4ee 8px 16px); border-radius: 6px; }

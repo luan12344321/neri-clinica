@@ -54,6 +54,8 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
   const { isManager, isOwner } = useRole();
   const [view, setView] = useState<View>('inicio');
   const [open, setOpen] = useState(false);
+  // Quem não é dono/gerente nunca fica numa tela restrita (ex.: Financeiro), mesmo que o perfil mude com o app aberto.
+  useEffect(() => { if (NAV.flatMap((g) => g.items).find((i) => i.id === view)?.mgr && !isManager) setView('inicio'); }, [view, isManager]);
   // Estoque atual (não o aviso gravado pela rotina): some assim que o produto é reposto.
   const restock = useLoad<any[]>('/stock/restock');
   const menuBtn = useRef<HTMLButtonElement>(null);
@@ -558,13 +560,15 @@ function Stock({ go }: { go: (v: View, tab?: FinTab) => void }) {
 
 // ---------- Julia ----------
 type Msg = { role: 'user' | 'sara'; text: string; retry?: string };
-const SUGGESTIONS: { icon: IconName; title: string; text: string }[] = [
-  { icon: 'chart', title: 'Faturamento', text: 'Faturamento e nº de pacientes dos últimos 6 meses' },
+const SUGGESTIONS: { icon: IconName; title: string; text: string; mgr?: boolean }[] = [
+  { icon: 'chart', title: 'Faturamento', text: 'Faturamento e nº de pacientes dos últimos 6 meses', mgr: true },
   { icon: 'box', title: 'Estoque', text: 'Quais produtos preciso repor?' },
-  { icon: 'pulse', title: 'Ticket médio', text: 'Como aumentar meu ticket médio?' },
+  { icon: 'pulse', title: 'Ticket médio', text: 'Como aumentar meu ticket médio?', mgr: true },
+  { icon: 'calendar', title: 'Horários livres', text: 'Quais horários livres tenho amanhã?' },
 ];
 
 function Julia({ name }: { name?: string }) {
+  const { isManager } = useRole();
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -599,7 +603,7 @@ function Julia({ name }: { name?: string }) {
             <h2>Olá{name ? `, ${name.split(/\s+/)[0]}` : ''}</h2>
             <p className="muted">Eu sou a Julia. Pergunte sobre faturamento, pacientes, estoque ou finanças da clínica.</p>
             <div className="sugg">
-              {SUGGESTIONS.map((s) => (
+              {SUGGESTIONS.filter((s) => !s.mgr || isManager).map((s) => (
                 <button key={s.title} className="sugg-card" onClick={() => send(s.text)}>
                   <Icon name={s.icon} size={22} /><b>{s.title}</b><span>{s.text}</span>
                 </button>
