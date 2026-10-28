@@ -481,7 +481,7 @@ function Messages() {
         <ul className="rows">{auto.data?.followupRules.map((r) => (
           <li key={r.id}><div className="row-btn static"><span className="q-ico"><Icon name="calendar" size={20} /></span><span className="grow"><b>{r.days_after} dia(s) depois</b><span className="muted">{procs.data?.find((p) => p.id === r.procedure_id)?.name ?? 'qualquer procedimento'}</span></span></div></li>
         ))}</ul>
-        <p className="muted pad">As mensagens entram na fila e saem pelo WhatsApp; sem a conexão configurada, ficam como falhas na fila.</p>
+        <p className="muted pad">O envio automático pós-procedimento está desligado: o acompanhamento agora é feito pelos <b>Retornos do dia</b> (na tela Início), com envio manual pelo WhatsApp. Estas regras ficam guardadas, mas não disparam sozinhas.</p>
       </section>
       {adding === 'modelo' && (
         <Sheet title="Novo modelo de mensagem" onClose={() => setAdding(null)}>
