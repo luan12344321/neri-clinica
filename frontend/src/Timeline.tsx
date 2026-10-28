@@ -111,7 +111,7 @@ export function ApptSheet({ appt, clinical, busy, onClose, onStart, onChart, onC
       <div className="actions col">
         {clinical && !done && <button className="primary" onClick={onStart}>Iniciar atendimento</button>}
         {clinical && <button className="ghost" onClick={onChart}>Ver prontuário</button>}
-        {!clinical && !done && <button className="primary" disabled={busy} onClick={onComplete}>Concluir atendimento</button>}
+        {!done && (clinical ? <button className="ghost" onClick={onComplete}>Concluir atendimento</button> : <button className="primary" disabled={busy} onClick={onComplete}>Concluir atendimento</button>)}
         {!done && <button className="ghost" onClick={onMove}>Reagendar</button>}
       </div>
     </Sheet>

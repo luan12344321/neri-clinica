@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { q } from './db.js';
 import { buildDre } from './queries.js';
 import { syncAllClinics } from './google.js';
+import { returnsTick } from './retornos.js';
 
 const TZ = 'America/Sao_Paulo';
 const render = (body, vars) => body.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? '');
@@ -18,6 +19,10 @@ export const tasks = {
        AND to_char(p.birth_date,'MM-DD') = to_char(now() AT TIME ZONE $1,'MM-DD')
      ON CONFLICT DO NOTHING`, [TZ]),
 
+  // Retorno por regra da doutora (só atualiza estado; nunca envia). Substitui o follow-up automático (mudança 2 aprovada pelo usuário).
+  returnsTick,
+
+  // DESLIGADO no tick e no cron (o Retorno substitui a mensagem automática); mantido exportado e funcional.
   followup: () => q(
     `INSERT INTO message_queue (clinic_id, patient_id, kind, body, dedupe_key)
      SELECT a.clinic_id, a.patient_id, 'followup', t.body, 'fu:' || r.id || ':' || a.id
@@ -84,7 +89,7 @@ export async function tick(now = new Date()) {
   const [missing] = await q(
     `SELECT 1 AS m FROM clinics c WHERE NOT EXISTS (SELECT 1 FROM dre_reports d WHERE d.clinic_id=c.id
        AND d.month = (date_trunc('month', $1::timestamptz AT TIME ZONE $2) - interval '1 month')::date) LIMIT 1`, [now.toISOString(), TZ]);
-  const order = [hour >= 9 && 'birthday', 'followup', 'stock', missing && !(day === 1 && hour < 6) && 'dre', 'outbox', 'googleSync'].filter(Boolean);
+  const order = [hour >= 9 && 'birthday', 'returnsTick', 'stock', missing && !(day === 1 && hour < 6) && 'dre', 'outbox', 'googleSync'].filter(Boolean);
   const result = {};
   for (const name of order) {
     try { await tasks[name](); result[name] = 'ok'; } catch (e) { result[name] = `erro: ${e.message}`; }
@@ -97,7 +102,7 @@ export function startJobs(log) {
     try { await tasks[name](); } catch (e) { log.error({ err: e }, `job ${name}`); }
   }, opts);
   at('0 9 * * *', 'birthday', { timezone: TZ });
-  at('*/15 * * * *', 'followup');
+  at('30 6 * * *', 'returnsTick', { timezone: TZ });
   at('5 * * * *', 'stock');
   at('0 6 1 * *', 'dre', { timezone: TZ });
   at('* * * * *', 'outbox');

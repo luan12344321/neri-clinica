@@ -57,6 +57,12 @@ await app.register((await import('./payments.js')).default);
 await app.register((await import('./hours.js')).default);
 await app.register((await import('./prontuario.js')).default);
 await app.register((await import('./whatsapp.js')).default);
+await app.register((await import('./atendimento.js')).default);
+await app.register((await import('./rastreabilidade.js')).default);
+await app.register((await import('./retornos.js')).default);
+await app.register((await import('./fila.js')).default);
+await app.register((await import('./painel_ciclo.js')).default);
+await app.register((await import('./lotes.js')).default);
 const clinic = (req) => req.user.clinicId;
 
 // ---------- Auth ----------
@@ -144,7 +150,7 @@ app.patch('/appointments/:id', guard, async (req, reply) => {
   return row;
 });
 
-// Concluir atendimento: gera receita + baixa de estoque pelo protocolo (tudo em uma transação)
+// Concluir atendimento (legado): fecha e gera a receita. NÃO baixa estoque; a baixa só ocorre com confirmação em POST /appointments/:id/conclude (atendimento.js)
 app.post('/appointments/:id/complete', guard, async (req, reply) => {
   const { id } = z.object({ id: z.guid() }).parse(req.params);
   const { pool } = await import('./db.js');
@@ -164,15 +170,6 @@ app.post('/appointments/:id/complete', guard, async (req, reply) => {
          FROM (SELECT (now() AT TIME ZONE timezone)::date AS d FROM clinics WHERE id=$1) c`,
         [a.clinic_id, a.id, a.price]);
     }
-    await c.query(
-      `WITH items AS (
-         SELECT pi.product_id, pi.quantity FROM protocols p
-         JOIN protocol_items pi ON pi.protocol_id=p.id
-         WHERE p.clinic_id=$1 AND p.procedure_id=$2),
-       mv AS (INSERT INTO stock_movements (clinic_id,product_id,delta,reason,appointment_id)
-              SELECT $1, product_id, -quantity, 'usage', $3 FROM items RETURNING product_id, delta)
-       UPDATE products pr SET quantity = pr.quantity + mv.delta FROM mv WHERE pr.id = mv.product_id`,
-      [a.clinic_id, a.procedure_id, a.id]);
     await c.query('COMMIT');
     return a;
   } catch (e) { await c.query('ROLLBACK'); throw e; } finally { c.release(); }

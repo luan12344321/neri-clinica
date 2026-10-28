@@ -143,5 +143,6 @@ test('o sync reenvia agendamentos futuros que não chegaram ao Google', async ()
   const a = await book();            // criado antes de conectar
   await connect();
   await t.call('POST', '/google/sync', { token });
-  assert.equal((await row(a.id)).google_event_id, 'ev1');
+  // o seed tem um atendimento 'hoje às 14h' que, antes das 14h, também é futuro e recebe o primeiro id: não dependa do número
+  assert.match((await row(a.id)).google_event_id ?? '', /^ev[0-9]+$/);
 });

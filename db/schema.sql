@@ -281,3 +281,116 @@ CREATE VIEW v_restock AS
 SELECT clinic_id, id AS product_id, name, quantity, min_quantity,
        GREATEST(target_quantity - quantity, 0) AS qty_to_buy
 FROM products WHERE quantity <= min_quantity;
+
+-- ===== Ciclo do procedimento (lotes, aplicações, retorno, consentimento, rastreabilidade) =====
+-- Gerado a partir de CYCLE_STEPS em backend/src/schema.js (mesmos comandos, idempotentes).
+ALTER TABLE products
+  ADD COLUMN IF NOT EXISTS category text,
+  ADD COLUMN IF NOT EXISTS manufacturer text,
+  ADD COLUMN IF NOT EXISTS device_type text NOT NULL DEFAULT 'other'
+    CHECK (device_type IN ('toxin','hyaluronic_acid','plla','pmma','calcium_hydroxylapatite','other')),
+  ADD COLUMN IF NOT EXISTS units_per_package numeric(12,2) NOT NULL DEFAULT 1 CHECK (units_per_package > 0);
+
+CREATE TABLE IF NOT EXISTS product_lots (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  clinic_id uuid NOT NULL REFERENCES clinics ON DELETE CASCADE,
+  product_id uuid NOT NULL REFERENCES products,
+  lot_code text NOT NULL,
+  expires_at date NOT NULL,
+  manufacturer text,
+  quantity_units numeric(12,2) NOT NULL CHECK (quantity_units >= 0),   -- saldo em UNIDADES de aplicação
+  initial_units numeric(12,2) NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (clinic_id, product_id, lot_code)
+);
+CREATE INDEX IF NOT EXISTS product_lots_expiry ON product_lots (clinic_id, expires_at);
+CREATE INDEX IF NOT EXISTS product_lots_product ON product_lots (clinic_id, product_id);
+
+ALTER TABLE stock_movements
+  ADD COLUMN IF NOT EXISTS lot_id uuid REFERENCES product_lots,
+  ADD COLUMN IF NOT EXISTS application_id uuid;
+CREATE INDEX IF NOT EXISTS stock_movements_application ON stock_movements (application_id);
+
+CREATE TABLE IF NOT EXISTS procedure_return_rules (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  clinic_id uuid NOT NULL REFERENCES clinics ON DELETE CASCADE,
+  procedure_id uuid NOT NULL REFERENCES procedures,
+  target_days int NOT NULL,
+  window_min_days int NOT NULL,
+  window_max_days int NOT NULL,
+  message_text text NOT NULL,
+  active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (window_min_days > 0 AND window_min_days <= target_days AND target_days <= window_max_days),
+  UNIQUE (clinic_id, procedure_id)
+);
+
+CREATE TABLE IF NOT EXISTS applications (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  clinic_id uuid NOT NULL REFERENCES clinics ON DELETE CASCADE,
+  appointment_id uuid NOT NULL REFERENCES appointments,
+  patient_id uuid NOT NULL REFERENCES patients,
+  product_id uuid NOT NULL REFERENCES products,
+  lot_id uuid REFERENCES product_lots,
+  units_used numeric(12,2) NOT NULL CHECK (units_used > 0),
+  unit_cost numeric(12,4),                    -- custo por unidade no momento da aplicação
+  cost numeric(12,2),                         -- units_used x unit_cost
+  label_photo_enc text,                       -- foto do rótulo, cifrada
+  created_by uuid REFERENCES users,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS applications_appointment ON applications (clinic_id, appointment_id);
+CREATE INDEX IF NOT EXISTS applications_created ON applications (clinic_id, created_at);
+
+CREATE TABLE IF NOT EXISTS returns (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  clinic_id uuid NOT NULL REFERENCES clinics ON DELETE CASCADE,
+  patient_id uuid NOT NULL REFERENCES patients,
+  procedure_id uuid NOT NULL REFERENCES procedures,
+  source_appointment_id uuid NOT NULL REFERENCES appointments,
+  suggested_date date NOT NULL,
+  window_start date,
+  window_end date,
+  state text NOT NULL DEFAULT 'suggested'
+    CHECK (state IN ('suggested','scheduled','declined','no_response','remind_later','done')),
+  contacted_at timestamptz,
+  remind_on date,
+  generated_appointment_id uuid,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (clinic_id, source_appointment_id, procedure_id)
+);
+CREATE INDEX IF NOT EXISTS returns_due ON returns (clinic_id, suggested_date, state);
+
+CREATE TABLE IF NOT EXISTS contact_consents (   -- histórico: só insere; vale o último registro por (paciente, finalidade)
+  id bigserial PRIMARY KEY,
+  clinic_id uuid NOT NULL REFERENCES clinics ON DELETE CASCADE,
+  patient_id uuid NOT NULL REFERENCES patients,
+  purpose text NOT NULL CHECK (purpose IN ('return','birthday','marketing')),
+  granted boolean NOT NULL,
+  recorded_at timestamptz NOT NULL DEFAULT now(),
+  recorded_by uuid REFERENCES users
+);
+CREATE INDEX IF NOT EXISTS contact_consents_latest ON contact_consents (clinic_id, patient_id, purpose, recorded_at DESC);
+
+CREATE TABLE IF NOT EXISTS traceability_documents (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  clinic_id uuid NOT NULL REFERENCES clinics ON DELETE CASCADE,
+  appointment_id uuid NOT NULL REFERENCES appointments,
+  patient_id uuid NOT NULL REFERENCES patients,
+  pdf_enc text NOT NULL,                      -- cifrado (AAD traceability.pdf:<id>)
+  created_by uuid REFERENCES users,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS traceability_appointment ON traceability_documents (clinic_id, appointment_id);
+
+CREATE TABLE IF NOT EXISTS ai_record_usage (
+  id bigserial PRIMARY KEY,
+  clinic_id uuid NOT NULL REFERENCES clinics ON DELETE CASCADE,
+  patient_id uuid REFERENCES patients,
+  user_id uuid REFERENCES users,
+  tool text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ai_record_usage_clinic ON ai_record_usage (clinic_id, created_at);

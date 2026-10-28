@@ -10,7 +10,7 @@ beforeEach(async () => { await t.reset(); await t.addExtras(); token = await t.t
 const todayAppt = async () => (await t.sql(`SELECT id FROM appointments WHERE clinic_id=$1 AND status='scheduled'`, [A]))[0].id;
 const prevMonth = async () => (await t.sql(`SELECT to_char(date_trunc('month', now()) - interval '1 month','YYYY-MM') m`))[0].m;
 
-test('concluir atendimento: gera recebível categorizado e baixa o estoque do protocolo', async () => {
+test('concluir atendimento: gera recebível categorizado e NÃO baixa estoque (baixa só com confirmação)', async () => {
   const id = await todayAppt();
   const r = await t.call('POST', `/appointments/${id}/complete`, { token });
   assert.equal(r.status, 200);
@@ -19,17 +19,17 @@ test('concluir atendimento: gera recebível categorizado e baixa o estoque do pr
   assert.deepEqual([tx.a, tx.status], [1200, 'pending']);
   assert.ok(tx.category_id, 'recebível precisa de categoria para entrar no DRE');
   const [p] = await t.sql(`SELECT quantity::float q FROM products WHERE id='40000000-0000-0000-0000-000000000001'`);
-  assert.equal(p.q, 0.5); // 1 − 0,5 do protocolo
+  assert.equal(p.q, 1); // protocolo é só sugestão: nada baixa sem confirmação
   const [m] = await t.sql(`SELECT delta::float d, reason FROM stock_movements WHERE appointment_id=$1`, [id]);
-  assert.deepEqual([m.d, m.reason], [-0.5, 'usage']);
+  assert.equal(m, undefined);
 });
 
-test('concluir duas vezes dá 409 e não duplica receita nem baixa estoque de novo', async () => {
+test('concluir duas vezes dá 409 e não duplica receita', async () => {
   const id = await todayAppt();
   await t.call('POST', `/appointments/${id}/complete`, { token });
   assert.equal((await t.call('POST', `/appointments/${id}/complete`, { token })).status, 409);
   assert.equal((await t.sql(`SELECT count(*)::int n FROM transactions WHERE appointment_id=$1`, [id]))[0].n, 1);
-  assert.equal((await t.sql(`SELECT quantity::float q FROM products WHERE id='40000000-0000-0000-0000-000000000001'`))[0].q, 0.5);
+  assert.equal((await t.sql(`SELECT quantity::float q FROM products WHERE id='40000000-0000-0000-0000-000000000001'`))[0].q, 1);
 });
 
 test('cancelado não pode ser concluído', async () => {
