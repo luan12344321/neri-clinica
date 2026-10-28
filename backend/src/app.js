@@ -268,7 +268,20 @@ app.post('/sara/test', { ...owner, config: { rateLimit: { max: 5, timeWindow: '1
   try { await pingSara(); return { ok: true }; } catch (e) { return aiError(req, reply, e); }
 });
 
-app.get('/health', async () => ({ ok: true }));
+// /health responde sempre (a função está de pé). /health?deep=1 também testa o banco: use este no monitor de disponibilidade.
+app.get('/health', async (req, reply) => {
+  if (!req.query?.deep) return { ok: true };
+  try { await q('SELECT 1'); return { ok: true, db: true }; }
+  catch { return reply.code(503).send({ ok: false, db: false }); }
+});
+
+// Erros de tela (ErrorBoundary) vão para o log do servidor, onde a Vercel mostra e permite alertar. Sem login, limitado por IP,
+// só mensagem curta e pilha (sem dados do paciente: o corpo é cortado e a rota guardada sem a query).
+app.post('/client-error', { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (req, reply) => {
+  const b = z.object({ message: z.string().max(300), stack: z.string().max(1500).optional(), path: z.string().max(120).optional() }).safeParse(req.body);
+  if (b.success) req.log.error({ type: 'client_error', message: b.data.message, stack: b.data.stack, path: b.data.path?.split('?')[0] }, 'client error');
+  return reply.code(204).send();
+});
 
 // Cron da Vercel (vercel.json): chama GET com 'Authorization: Bearer <CRON_SECRET>'. Sem o segredo configurado a rota fica fechada.
 app.get('/cron/tick', async (req, reply) => {
