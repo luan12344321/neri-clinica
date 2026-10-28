@@ -430,7 +430,7 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
                   <BarChart data={series} margin={{ top: 8, right: 8, left: -14, bottom: 0 }}>
                     <CartesianGrid vertical={false} stroke="var(--line)" />
                     <XAxis dataKey="m" tickLine={false} axisLine={false} tick={{ fill: 'var(--muted)', fontSize: 12 }} />
-                    <YAxis tickLine={false} axisLine={false} width={44} tick={{ fill: 'var(--muted)', fontSize: 12 }} tickFormatter={(v) => (v >= 1000 ? `${v / 1000}k` : v)} />
+                    <YAxis tickLine={false} axisLine={false} width={52} tick={{ fill: 'var(--muted)', fontSize: 12 }} tickFormatter={(v) => (v >= 1000 ? `${Math.round(v / 100) / 10}k` : v)} />
                     <Tooltip formatter={(v: number) => [hidden ? '••••' : brl(v), 'Receita']}
                       contentStyle={{ background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--ink)' }} />
                     <Bar dataKey="revenue" radius={[10, 10, 10, 10]} maxBarSize={34}>

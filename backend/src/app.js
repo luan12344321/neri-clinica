@@ -128,9 +128,14 @@ app.post('/appointments', guard, async (req, reply) => {
     `INSERT INTO appointments (clinic_id, patient_id, procedure_id, professional_id, starts_at, ends_at, price)
      SELECT $1,$2,$3,$4,$5,$6, COALESCE($7, (SELECT default_price FROM procedures WHERE id=$3 AND clinic_id=$1))
      WHERE EXISTS (SELECT 1 FROM patients WHERE id=$2 AND clinic_id=$1)
+       AND NOT EXISTS (SELECT 1 FROM appointments x WHERE x.clinic_id=$1 AND x.status NOT IN ('canceled','no_show')
+                       AND x.starts_at < $6 AND x.ends_at > $5 AND ($4::uuid IS NULL OR x.professional_id=$4))
      RETURNING *`,
     [clinic(req), b.patientId, b.procedureId ?? null, b.professionalId ?? null, b.startsAt, b.endsAt, b.price ?? null]);
-  if (!row) return reply.code(404).send({ error: 'patient not found' });
+  if (!row) {
+    const [p] = await q('SELECT 1 FROM patients WHERE id=$1 AND clinic_id=$2', [b.patientId, clinic(req)]);
+    return reply.code(p ? 409 : 404).send({ error: p ? 'slot_taken' : 'patient not found' });
+  }
   pushAppointment(row.id).catch((e) => req.log.error(e)); // se falhar, o cron de sync reenvia
   return reply.code(201).send(row);
 });
@@ -144,9 +149,16 @@ app.patch('/appointments/:id', guard, async (req, reply) => {
   const [row] = await q(
     `UPDATE appointments SET starts_at=COALESCE($3,starts_at), ends_at=COALESCE($4,ends_at),
        status=COALESCE($5,status), updated_at=now()
-     WHERE id=$1 AND clinic_id=$2 AND status IN ('scheduled','confirmed') RETURNING *`,
+     WHERE id=$1 AND clinic_id=$2 AND status IN ('scheduled','confirmed')
+       AND ($3::timestamptz IS NULL OR NOT EXISTS (SELECT 1 FROM appointments x WHERE x.clinic_id=$2 AND x.id<>$1
+            AND x.status NOT IN ('canceled','no_show') AND x.starts_at < $4::timestamptz AND x.ends_at > $3::timestamptz
+            AND (appointments.professional_id IS NULL OR x.professional_id=appointments.professional_id)))
+     RETURNING *`,
     [id, clinic(req), b.startsAt ?? null, b.endsAt ?? null, b.status ?? null]);
-  if (!row) return reply.code(404).send({ error: 'not found or already closed' });
+  if (!row) {
+    const [still] = await q(`SELECT 1 FROM appointments WHERE id=$1 AND clinic_id=$2 AND status IN ('scheduled','confirmed')`, [id, clinic(req)]);
+    return reply.code(still ? 409 : 404).send({ error: still ? 'slot_taken' : 'not found or already closed' });
+  }
   pushAppointment(row.id).catch((e) => req.log.error(e));
   return row;
 });

@@ -124,7 +124,7 @@ function Summary({ sum, flow, banks, recv, pay, bump, goTab }: { sum: ReturnType
                     <BarChart data={flow.data.map((f) => ({ ...f, m: monthLabel(f.month) }))} margin={{ top: 8, right: 8, left: -14, bottom: 0 }} barGap={4}>
                       <CartesianGrid vertical={false} stroke="var(--line)" />
                       <XAxis dataKey="m" tickLine={false} axisLine={false} tick={{ fill: 'var(--muted)', fontSize: 12 }} />
-                      <YAxis tickLine={false} axisLine={false} width={44} tick={{ fill: 'var(--muted)', fontSize: 12 }} tickFormatter={(v) => (v >= 1000 ? `${v / 1000}k` : v)} />
+                      <YAxis tickLine={false} axisLine={false} width={52} tick={{ fill: 'var(--muted)', fontSize: 12 }} tickFormatter={(v) => (v >= 1000 ? `${Math.round(v / 100) / 10}k` : v)} />
                       <Tooltip cursor={{ fill: 'var(--line)', opacity: 0.4 }} formatter={(v: number, n: string) => [hidden ? '••••' : brl(v), n === 'income' ? 'Entradas' : 'Saídas']}
                         contentStyle={{ background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--ink)' }} />
                       <Bar dataKey="income" fill="var(--c1)" radius={[8, 8, 8, 8]} maxBarSize={22} />
