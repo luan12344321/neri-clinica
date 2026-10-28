@@ -1,8 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { ApiError, api, brl } from './api';
 import { useLoad } from './hooks';
+import { ComprovantesDoPaciente } from './Comprovante';
+import { ConcluirAtendimento } from './Atendimento';
 import { Icon } from './Icon';
 import { dayIntervals, fromMin, slotsOf, useHours } from './hours';
+import { RegraRetornoSheet } from './RegraRetorno';
 import { Avatar, Empty, ListSkeleton, PageHead, Sheet, useRole, useToast } from './ui';
 
 type Opt = { value: string; label: string };
@@ -272,13 +275,7 @@ const fmtCpf = (d: string) => d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$
 
 // Ficha clínica: CPF em claro e prontuário. A API só entrega a perfis clínicos e registra cada acesso.
 function PatientDetail({ id, onClose, session, onFinish }: { id: string; onClose: () => void; session?: { id: string; label: string }; onFinish?: () => void }) {
-  const [finishing, setFinishing] = useState(false);
-  async function finish() {
-    if (!session) return;
-    setFinishing(true);
-    try { await api(`/appointments/${session.id}/complete`, { method: 'POST', json: {} }); toast('Atendimento concluído'); onFinish?.(); }
-    catch { toast('Não foi possível concluir. Tente novamente.'); } finally { setFinishing(false); }
-  }
+  const [finishing, setFinishing] = useState(false); // folha "Concluir atendimento" aberta (baixa de estoque só com confirmação)
   const p = useLoad<any>(`/patients/${id}`);
   const recs = useLoad<any[]>(`/patients/${id}/records`);
   const [adding, setAdding] = useState(false);
@@ -290,9 +287,10 @@ function PatientDetail({ id, onClose, session, onFinish }: { id: string; onClose
       {session && (
         <section className="card session">
           <div className="grow"><span className="pill ok">Atendimento em andamento</span><b>{session.label}</b></div>
-          <button className="primary" disabled={finishing} onClick={finish}>{finishing ? 'Concluindo…' : 'Concluir atendimento'}</button>
+          <button className="primary" disabled={finishing} onClick={() => setFinishing(true)}>Concluir atendimento</button>
         </section>
       )}
+      {session && finishing && <ConcluirAtendimento appointmentId={session.id} onClose={() => setFinishing(false)} onDone={() => onFinish?.()} />}
       {denied ? <section className="card"><Empty icon="alert" title="Sem acesso à ficha clínica" text="Seu perfil não tem permissão para ver dados clínicos." /></section> : (
         <>
           <Loading error={p.error} ready={!!p.data} rows={2} />
@@ -322,6 +320,7 @@ function PatientDetail({ id, onClose, session, onFinish }: { id: string; onClose
               </li>
             ))}</ul>
           </section>
+          {id && <ComprovantesDoPaciente patientId={id} />}
           {adding && (
             <Sheet title="Novo registro clínico" onClose={() => setAdding(false)}>
               <AddForm label="Salvar registro" onSubmit={async (v) => { await api(`/patients/${id}/records`, { method: 'POST', json: v }); recs.reload(); setAdding(false); toast('Registro salvo'); }} fields={[
@@ -340,6 +339,7 @@ function Procedures() {
   const { isManager } = useRole();
   const l = useList<any[]>('/procedures');
   const [adding, setAdding] = useState(false);
+  const [ruleFor, setRuleFor] = useState<{ id: string; name: string } | null>(null);
   const toast = useToast();
   return (
     <>
@@ -355,10 +355,12 @@ function Procedures() {
               <span className="q-ico"><Icon name="syringe" size={20} /></span>
               <span className="grow"><b>{p.name}</b><span className="muted">{p.duration_min} min</span></span>
               <b className="amount">{brl(Number(p.default_price))}</b>
+              <button className="ghost sm" style={{ minHeight: 44 }} onClick={() => setRuleFor({ id: p.id, name: p.name })} aria-label={`Regra de retorno de ${p.name}`}>Retorno</button>
             </div>
           </li>
         ))}</ul>
       </section>
+      {ruleFor && <RegraRetornoSheet procedure={ruleFor} onClose={() => setRuleFor(null)} />}
       {adding && (
         <Sheet title="Novo procedimento" onClose={() => setAdding(false)}>
           <AddForm label="Salvar procedimento" onSubmit={async (v) => { await api('/procedures', { method: 'POST', json: v }); l.reload(); setAdding(false); toast('Procedimento salvo'); }} fields={[

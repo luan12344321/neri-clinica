@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { q, pool } from './db.js';
 import { audit, auditCtx } from './audit.js';
+import { ensureSchema } from './schema.js';
 
 const money = z.number().nonnegative();
 const id = z.guid();
@@ -49,13 +50,18 @@ export default async function cadastros(app) {
   // Dono, gerente e recepção cuidam do estoque e da reposição. O CUSTO dos produtos é dado financeiro: só dono/gerente leem ou gravam.
   const sees$ = (req) => ['owner', 'manager'].includes(req.user.role);
   const noCost = (req, row) => { if (sees$(req) || !row) return row; const { unit_cost, ...rest } = row; return rest; };
-  app.get('/products', read, async (req) => (await q('SELECT * FROM products WHERE clinic_id=$1 ORDER BY name', [cid(req)])).map((p) => noCost(req, p)));
+  app.get('/products', read, async (req) => (await ensureSchema(), await q('SELECT * FROM products WHERE clinic_id=$1 ORDER BY name', [cid(req)])).map((p) => noCost(req, p)));
   app.post('/products', read, async (req, reply) => {
     const b = z.object({ name: z.string().min(2), unit: z.string().default('un'), minQuantity: money, targetQuantity: money,
-      unitCost: money.optional(), expiresAt: z.string().date().optional() }).parse(req.body);
-    const [r] = await q(`INSERT INTO products (clinic_id,name,unit,min_quantity,target_quantity,unit_cost,expires_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [cid(req), b.name, b.unit, b.minQuantity, b.targetQuantity, sees$(req) ? (b.unitCost ?? null) : null, b.expiresAt ?? null]);
+      unitCost: money.optional(), expiresAt: z.string().date().optional(),
+      category: z.string().trim().min(1).max(80).optional(), manufacturer: z.string().trim().min(1).max(120).optional(),
+      deviceType: z.enum(['toxin', 'hyaluronic_acid', 'plla', 'pmma', 'calcium_hydroxylapatite', 'other']).default('other'),
+      unitsPerPackage: z.number().positive().default(1) }).parse(req.body);
+    await ensureSchema();
+    const [r] = await q(`INSERT INTO products (clinic_id,name,unit,min_quantity,target_quantity,unit_cost,expires_at,category,manufacturer,device_type,units_per_package)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [cid(req), b.name, b.unit, b.minQuantity, b.targetQuantity, sees$(req) ? (b.unitCost ?? null) : null, b.expiresAt ?? null,
+        b.category ?? null, b.manufacturer ?? null, b.deviceType, b.unitsPerPackage]);
     await audit(auditCtx(req), 'stock.product_create', 'product', r.id);
     return reply.code(201).send(noCost(req, r));
   });

@@ -5,6 +5,7 @@ import { ApiError, api, brl, getToken, lastMonths, monthLabel, setToken, thisMon
 import { Icon, type IconName } from './Icon';
 import { AppointmentSheet, Cadastros, NewAppointment, RescheduleSheet, type Focus, type Section } from './Cadastros';
 import { ApptSheet, DayTimeline, ageOf } from './Timeline';
+import { ConcluirAtendimento } from './Atendimento';
 import { useHours } from './hours';
 import { Avatar, Empty, ErrorBoundary, EyeToggle, ListSkeleton, RoleProvider, ToastProvider, mask, useHideValues, useRole } from './ui';
 import { Settings, type Me } from './Settings';
@@ -210,9 +211,11 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
   const [bump, setBump] = useState(0);
   const [moving, setMoving] = useState<any | null>(null);
   const [open, setOpen] = useState<any | null>(null);
+  const [concluding, setConcluding] = useState('');
   const { hidden } = useHideValues();
 
   async function complete(id: string) {
+    if (isClinical) { setOpen(null); setConcluding(id); return; } // owner/gerente/profissional: folha com baixa de estoque confirmada
     setBusyId(id);
     try { await api(`/appointments/${id}/complete`, { method: 'POST', json: {} }); setOpen(null); dash.reload(); sum.reload(); recv.reload(); banks.reload(); setBump((b) => b + 1); }
     finally { setBusyId(''); }
@@ -441,6 +444,7 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
       {open && <ApptSheet appt={open} clinical={isClinical} busy={busyId === open.id} onClose={() => setOpen(null)}
         onStart={() => { const a = open; setOpen(null); onStart(a.patient_id, a); }} onChart={() => { const a = open; setOpen(null); onStart(a.patient_id, null); }}
         onComplete={() => complete(open.id)} onMove={() => { setMoving(open); setOpen(null); }} />}
+      {concluding && <ConcluirAtendimento appointmentId={concluding} onClose={() => setConcluding('')} onDone={() => { dash.reload(); sum.reload(); recv.reload(); banks.reload(); setBump((b) => b + 1); }} />}
       {moving && <RescheduleSheet appt={moving} onClose={() => setMoving(null)} onDone={() => { setMoving(null); dash.reload(); }} />}
     </div>
   );
