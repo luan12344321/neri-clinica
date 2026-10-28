@@ -602,15 +602,22 @@ button.ghost.danger { color: var(--neg); border-color: color-mix(in srgb, var(--
 .big-fig strong { font-size: 28px; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
 .big-fig span { color: var(--muted); font-size: 13px; }
 .legend b { background: var(--accent-soft); color: var(--accent); border-radius: 99px; padding: 2px 10px; font-size: 13px; }
-.day-strip { display: flex; align-items: center; gap: 14px; background: var(--hero); color: var(--hero-ink); border-radius: 99px; padding: 10px 18px; }
-.ds-title { font-weight: 650; font-size: 14px; }
-.ds-track { position: relative; flex: 1; height: 44px; margin-right: 12px; }
-.ds-tick { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed rgba(255, 255, 255, .22); }
-.ds-tick small { position: absolute; bottom: -2px; left: 4px; font-size: 10px; opacity: .6; font-style: normal; }
-.ds-dot { position: absolute; top: 4px; transform: translateX(-50%); width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: #fff; color: var(--hero); font-size: 12px; font-weight: 700; display: grid; place-items: center; }
-.ds-dot.done { opacity: .45; }
-.ds-now { position: absolute; top: -6px; bottom: -6px; width: 3px; border-radius: 3px; background: #fff; transform: translateX(-50%); box-shadow: 0 0 0 3px rgba(255, 255, 255, .2); }
-.day-grid > .day-strip { grid-column: 1 / -1; }
+.day-strip { background: var(--hero); color: var(--hero-ink); border-radius: 22px; padding: 14px 0 14px 16px; display: grid; gap: 10px; overflow: hidden; }
+.ds-head { display: flex; align-items: baseline; gap: 10px; padding-right: 16px; }
+.ds-head b { font-size: 16px; }
+.ds-head span { font-size: 13px; opacity: .75; }
+.ds-list { list-style: none; margin: 0; padding: 0 16px 2px 0; display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x proximity; }
+.ds-list li { flex: none; scroll-snap-align: start; }
+.ds-card { width: 150px; min-height: 96px; text-align: left; display: grid; align-content: start; gap: 2px; padding: 10px 12px; border: 1px solid rgba(255, 255, 255, .18); border-radius: 16px; background: rgba(255, 255, 255, .08); color: inherit; }
+.ds-card .ds-time { font-size: 13px; font-variant-numeric: tabular-nums; opacity: .8; }
+.ds-card b { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ds-card small { font-size: 12px; opacity: .75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ds-card em { font-style: normal; font-size: 11px; font-weight: 700; margin-top: 4px; width: fit-content; padding: 2px 8px; border-radius: 99px; background: rgba(255, 255, 255, .16); }
+.ds-card.next { background: #fff; color: var(--hero); border-color: #fff; }
+.ds-card.next em { background: var(--accent-soft); color: var(--accent); }
+.ds-card.done { opacity: .55; }
+.ds-card.late { border-color: var(--out); }
+.ds-card.late em { background: var(--out); color: #fff; }
 .attn-item { background: var(--card); border: 1px solid var(--line); }
 .attn-item.high { background: var(--warn-soft); border-color: transparent; }
 .urg { font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); }
