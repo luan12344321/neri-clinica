@@ -7,3 +7,8 @@ dist/
 .playwright-mcp/
 *.log
 netlify/dist-functions/
+
+# Material privado: nunca vai para o Git (repositório público)
+Logo/
+frontend/Referencias/
+frontend/Video/
