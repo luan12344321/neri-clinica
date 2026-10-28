@@ -1,5 +1,5 @@
 // Cliente mínimo da API do Gemini (generateContent) via fetch: sem SDK, a chave só existe no servidor (GEMINI_API_KEY).
-export const MODEL = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash';
+export const MODEL = process.env.GEMINI_MODEL ?? 'gemini-3.5-flash-lite';
 const BASE = process.env.GEMINI_API_BASE ?? 'https://generativelanguage.googleapis.com/v1beta';
 
 export class GeminiError extends Error {
