@@ -15,6 +15,10 @@ const clock = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 const mins = (d: Date) => d.getHours() * 60 + d.getMinutes();
 const HOUR = 56; // altura de uma hora, em px
 
+// Atrasado: ainda agendado/confirmado e o horário de término já passou. Única regra para Início e Agenda.
+export const isLate = (a: { status: string; starts_at: string; ends_at?: string | null }, now = Date.now()) =>
+  (a.status === 'scheduled' || a.status === 'confirmed') && new Date(a.ends_at ?? a.starts_at).getTime() < now;
+
 type Appt = { id: string; starts_at: string; ends_at?: string; status: string; patient: string; procedure: string | null; patient_id: string; birth_date?: string | null };
 
 // Agenda de hoje: mostra SÓ o horário de atendimento da clínica, faixa por faixa (por padrão 08:00–11:00, depois
@@ -74,7 +78,7 @@ export function DayTimeline({ appts, hours, onOpen, onBook, onSeeAll }: { appts:
           {nowSeg && <div className="tl-now" style={{ top: nowSeg.top + len(nowSeg.s, nowMin) }}><i>Agora {clock(now)}</i></div>}
           {placed.map(({ a, s, e, seg, lane }) => {
             const done = a.status === 'done';
-            const late = !done && e < nowMin;
+            const late = isLate(a, now.getTime());
             const cs = Math.max(s, seg.s), ce = Math.min(e, seg.e); // parte que cabe na faixa
             const bh = Math.max(28, len(cs, ce) - 3);
             return (
@@ -133,7 +137,7 @@ export function DayStrip({ appts, onOpen }: { appts: Appt[]; onOpen: (a: Appt) =
       <ul className="ds-list">
         {list.map((a) => {
           const done = a.status === 'done';
-          const late = !done && endMin(a) < nowMin;
+          const late = isLate(a);
           const cls = ['ds-card', done ? 'done' : '', late ? 'late' : '', a.id === nextId ? 'next' : ''].filter(Boolean).join(' ');
           return (
             <li key={a.id}>

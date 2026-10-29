@@ -4,7 +4,7 @@ import { Area, AreaChart, Bar, BarChart, Cell, Pie, PieChart, ResponsiveContaine
 import { ApiError, api, brl, getToken, lastMonths, monthLabel, setToken, thisMonth } from './api';
 import { Icon, type IconName } from './Icon';
 import { AppointmentSheet, Cadastros, NewAppointment, RescheduleSheet, type Focus, type Section } from './Cadastros';
-import { ApptSheet, DayStrip, DayTimeline, ageOf } from './Timeline';
+import { ApptSheet, DayStrip, DayTimeline, ageOf, isLate } from './Timeline';
 import { ConcluirAtendimento } from './Atendimento';
 import { AtencaoLista, RetornosDoDia, type AttItem } from './RetornosDoDia';
 import { useHours } from './hours';
@@ -596,8 +596,8 @@ function Agenda({ onStart }: { onStart: (patientId: string, appt: any | null) =>
                 <button className="row-btn" onClick={() => setOpen(a)} disabled={a.status === 'canceled'}>
                   <b className="appt-time">{new Date(a.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</b>
                   <span className="grow"><b>{a.patient}</b><span className="muted">{a.procedure ?? 'Sem procedimento'}</span></span>
-                  {(a.status === 'scheduled' || a.status === 'confirmed') && new Date(a.ends_at ?? a.starts_at).getTime() < Date.now()
-                    ? <span className="pill warn">Atrasado</span> /* mesmo critério da faixa "Hoje" do Início */
+                  {isLate(a)
+                    ? <span className="pill warn">Atrasado</span>
                     : <span className={`pill ${a.status === 'done' ? 'ok' : a.status === 'canceled' || a.status === 'no_show' ? 'warn' : ''}`}>{STATUS[a.status] ?? a.status}</span>}
                 </button>
               </li>
