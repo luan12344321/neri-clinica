@@ -74,7 +74,7 @@ export function LegalPage({ kind }: { kind: LegalKind }) {
   const other = kind === 'termos' ? { href: '#/privacidade', label: 'Política de Privacidade' } : { href: '#/termos', label: 'Termos de Uso' };
   return (
     <main className="legal" aria-labelledby="legal-title">
-      <a className="back" href="#/" onClick={(e) => { e.preventDefault(); history.pushState(null, '', location.pathname); window.dispatchEvent(new HashChangeEvent('hashchange')); }}>← Voltar</a>
+      <a className="back" href="#/" onClick={(e) => { e.preventDefault(); history.replaceState(null, '', location.pathname); /* substitui: o "voltar" do navegador não reabre o termo */ window.dispatchEvent(new HashChangeEvent('hashchange')); }}>← Voltar</a>
       <h1 id="legal-title">{doc.title}</h1>
       <p className="muted">NERI Clínica · atualizado em {doc.updated} · versão {TERMS_VERSION}</p>
       {doc.sections.map((s) => (

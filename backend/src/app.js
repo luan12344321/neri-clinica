@@ -125,10 +125,12 @@ app.get('/dashboard', guard, async (req) => {
 
 app.get('/appointments', guard, async (req) => {
   const { from, to } = z.object({ from: z.string().date(), to: z.string().date() }).parse(req.query);
+  // dias no fuso da clínica (comparar com a data pura usa o fuso do banco, UTC: o fim da noite caía no dia seguinte)
   return q(`SELECT a.*, p.full_name AS patient, pr.name AS procedure
             FROM appointments a JOIN patients p ON p.id=a.patient_id
             LEFT JOIN procedures pr ON pr.id=a.procedure_id
-            WHERE a.clinic_id=$1 AND a.starts_at >= $2 AND a.starts_at < $3::date + 1
+            JOIN clinics c ON c.id=a.clinic_id
+            WHERE a.clinic_id=$1 AND (a.starts_at AT TIME ZONE c.timezone)::date BETWEEN $2::date AND $3::date
             ORDER BY a.starts_at`, [clinic(req), from, to]);
 });
 

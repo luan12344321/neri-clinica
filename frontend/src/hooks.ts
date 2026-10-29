@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from './api';
 
 // O servidor responde com códigos em inglês ("Rate limit exceeded...", "internal error"); a tela mostra o motivo em português.
@@ -14,9 +14,13 @@ const loadErr = (e: unknown) =>
 export function useLoad<T>(path: string | null, every?: number) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState('');
+  const current = useRef(path);
+  current.current = path;
   const reload = useCallback(() => {
     if (path === null) return;
-    api<T>(path).then((d) => { setData(d); setError(''); }).catch((e) => setError(loadErr(e)));
+    // resposta de um caminho antigo (ex.: semana anterior da Agenda, clicada rápido) chega depois e é descartada
+    api<T>(path).then((d) => { if (current.current === path) { setData(d); setError(''); } })
+      .catch((e) => { if (current.current === path) setError(loadErr(e)); });
   }, [path]);
   useEffect(() => { reload(); }, [reload]);
   useEffect(() => {

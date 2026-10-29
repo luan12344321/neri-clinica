@@ -103,13 +103,15 @@ export function ApptSheet({ appt, clinical, busy, onClose, onStart, onChart, onC
 }) {
   const age = ageOf(appt.birth_date);
   const s = new Date(appt.starts_at), e = appt.ends_at ? new Date(appt.ends_at) : null;
-  const done = appt.status === 'done';
+  // concluído, faltou ou cancelado: estado final, sem concluir/reagendar (o servidor recusaria com 409)
+  const done = appt.status === 'done' || appt.status === 'no_show' || appt.status === 'canceled';
+  const label = { done: 'Concluído', no_show: 'Faltou', canceled: 'Cancelado', confirmed: 'Confirmado' }[appt.status] ?? (isLate(appt) ? 'Atrasado' : 'Agendado');
   return (
     <Sheet title="Atendimento" onClose={onClose}>
       <div className="appt-head">
         <Avatar name={appt.patient} size={56} />
         <div className="grow"><b>{appt.patient}</b><span className="muted">{[age !== null ? `${age} anos` : null, appt.procedure ?? 'Sem procedimento'].filter(Boolean).join(' · ')}</span></div>
-        <span className={`pill ${done ? 'ok' : ''}`}>{done ? 'Concluído' : 'Agendado'}</span>
+        <span className={`pill ${appt.status === 'done' ? 'ok' : done || isLate(appt) ? 'warn' : ''}`}>{label}</span>
       </div>
       <p className="muted"><Icon name="calendar" size={16} /> {clock(s)}{e ? ` às ${clock(e)}` : ''}</p>
       <div className="actions col">

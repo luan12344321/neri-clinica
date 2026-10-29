@@ -23,6 +23,15 @@ test('agendar no mesmo horário é recusado (409 slot_taken); horário vizinho p
   assert.equal((await book(P2, new Date(s.getTime() + 60 * 60_000))).status, 201, 'encostar no fim não conflita');
 });
 
+test('lista da agenda usa o dia no fuso da clínica (22:30 de São Paulo é do mesmo dia, não do seguinte)', async () => {
+  // 2030-03-05 22:30 em São Paulo (UTC-3) = 2030-03-06 01:30 UTC
+  await t.sql(`INSERT INTO appointments (clinic_id, patient_id, starts_at, ends_at)
+               SELECT clinic_id, id, '2030-03-06T01:30:00Z', '2030-03-06T02:00:00Z' FROM patients WHERE id=$1`, [P1]);
+  const list = async (from, to) => (await t.call('GET', `/appointments?from=${from}&to=${to}`, { token: owner })).json.length;
+  assert.equal(await list('2030-03-05', '2030-03-05'), 1);
+  assert.equal(await list('2030-03-06', '2030-03-06'), 0);
+});
+
 test('cancelado não ocupa o horário', async () => {
   const s = at(31, 15);
   const a = await book(P1, s);
