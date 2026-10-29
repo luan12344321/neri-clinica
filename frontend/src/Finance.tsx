@@ -19,7 +19,7 @@ const KIND: Record<Bank['kind'], string> = { checking: 'Conta corrente', savings
 const INSTITUTIONS = ['Nubank', 'Itaú', 'Bradesco', 'Banco do Brasil', 'Caixa', 'Santander', 'Inter', 'C6 Bank', 'Sicoob', 'Sicredi', 'Mercado Pago', 'PagBank', 'Stone', 'Cora', 'Dinheiro', 'Outro'];
 const PIX_TYPES = [{ value: 'cpf', label: 'CPF' }, { value: 'cnpj', label: 'CNPJ' }, { value: 'email', label: 'E-mail' }, { value: 'phone', label: 'Celular' }, { value: 'random', label: 'Chave aleatória' }];
 const dateBR = (d: string) => new Date(`${String(d).slice(0, 10)}T12:00`).toLocaleDateString('pt-BR');
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' }); // não UTC: depois das 21h seria amanhã
 
 const Status = ({ error, loading }: { error: string; loading: boolean }) =>
   error ? <p role="alert" className="err">{error}</p> : loading ? <ListSkeleton rows={3} /> : null;
