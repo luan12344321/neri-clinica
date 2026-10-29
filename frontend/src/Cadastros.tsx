@@ -38,8 +38,10 @@ export function AddForm({ fields, label, onSubmit }: { fields: Field[]; label: s
 
   async function submit(e: FormEvent) {
     e.preventDefault(); setErr('');
+    // espaços nas pontas não contam (só "   " = vazio); senha vai como digitada
+    const clean = (f: Field) => { const raw = v[f.name]; return typeof raw === 'string' && f.type !== 'password' ? raw.trim() : raw; };
     const found = Object.fromEntries(fields.flatMap((f) => {
-      const val = String(v[f.name] ?? '').trim();
+      const val = String(clean(f) ?? '');
       const msg = val && f.check ? f.check(val) : null;
       return msg ? [[f.name, msg]] : [];
     }));
@@ -49,7 +51,7 @@ export function AddForm({ fields, label, onSubmit }: { fields: Field[]; label: s
     setBusy(true);
     const out: Record<string, unknown> = {};
     for (const f of fields) {
-      const val = v[f.name];
+      const val = clean(f);
       if (f.type === 'checkbox') out[f.name] = !!val;
       else if (val !== '') out[f.name] = f.type === 'number' ? Number(val) : val;
     }
@@ -96,6 +98,8 @@ const isBirthday = (d?: string | null) => !!d && String(d).slice(5, 10) === new 
 const pad = (n: number) => String(n).padStart(2, '0');
 const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const hhmm = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+// "hoje às 14:00" ou "qui, 5 de nov às 14:00"
+const whenLabel = (d: Date) => `${ymd(d) === ymd(new Date()) ? 'hoje' : d.toLocaleDateString('pt-BR', { weekday: 'short', day: 'numeric', month: 'short' }).replace(/\./g, '')} às ${hhmm(d)}`;
 const SLOTS = Array.from({ length: 27 }, (_, i) => `${pad(7 + Math.floor(i / 2))}:${i % 2 ? '30' : '00'}`); // 07:00 às 20:00
 type Slot = { date: string; time: string };
 
@@ -213,7 +217,7 @@ export function RescheduleSheet({ appt, onClose, onDone }: { appt: any; onClose:
   }
   return (
     <Sheet title="Reagendar" onClose={onClose}>
-      <p className="muted"><b>{appt.patient}</b> · {appt.procedure ?? 'Sem procedimento'} · hoje às {hhmm(new Date(appt.starts_at))}</p>
+      <p className="muted"><b>{appt.patient}</b> · {appt.procedure ?? 'Sem procedimento'} · {whenLabel(new Date(appt.starts_at))}</p>
       <SlotPicker value={slot} onChange={setSlot} ignoreId={appt.id} />
       {err && <p role="alert" className="err">{err}</p>}
       <button className="primary" disabled={busy} onClick={go}>{busy ? 'Salvando…' : 'Confirmar novo horário'}</button>
