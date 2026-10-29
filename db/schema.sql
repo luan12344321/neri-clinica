@@ -261,7 +261,8 @@ CREATE TABLE IF NOT EXISTS wa_contacts (
   read_upto bigint NOT NULL DEFAULT 0,       -- última mensagem do cliente já vista pela equipe (wa_messages.id)
   PRIMARY KEY (clinic_id, contact)
 );
-ALTER TABLE wa_messages ADD COLUMN IF NOT EXISTS staff_user_id uuid;  -- preenchido quando a equipe (e não a Julia) enviou
+ALTER TABLE wa_messages ADD COLUMN IF NOT EXISTS staff_user_id uuid;
+ALTER TABLE clinics ADD COLUMN IF NOT EXISTS wa_julia_help_day date;  -- dia em que a recepção ligou a Julia no expediente (vale só nesse dia)  -- preenchido quando a equipe (e não a Julia) enviou
 
 CREATE TABLE audit_log (                     -- LGPD: quem acessou/alterou o quê
   id bigserial PRIMARY KEY,

@@ -42,12 +42,17 @@ const inbound = (from, text) => {
   return t.app.inject({ method: 'POST', url: '/webhooks/whatsapp', payload: raw,
     headers: { 'content-type': 'application/json', 'x-hub-signature-256': `sha256=${createHmac('sha256', SECRET).update(raw).digest('hex')}` } });
 };
-const configure = async () => t.call('PUT', '/integrations/whatsapp', { token: await owner(),
-  body: { number: '+55 11 90000-0000', phoneId: PHONE_ID, token: TOKEN, appSecret: SECRET, enabled: true } });
+const configure = async () => {
+  const r = await t.call('PUT', '/integrations/whatsapp', { token: await owner(),
+    body: { number: '+55 11 90000-0000', phoneId: PHONE_ID, token: TOKEN, appSecret: SECRET, enabled: true } });
+  await t.sql("UPDATE clinics SET wa_julia_help_day = (now() AT TIME ZONE 'America/Sao_Paulo')::date");
+  return r;
+};
 const base = `/integrations/whatsapp/conversations`;
 
 test('lista conversas, abre, marca como lida e a equipe responde (pausa a Julia)', async () => {
   await configure();
+  await t.call('PUT', '/clinic/hours', { token: await owner(), body: { hours: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((d) => [d, [['00:00', '23:30']]])) } }); // sempre no expediente
   gemini.push([{ text: 'Oi! Em que posso ajudar?' }]);
   await inbound(CLIENT, 'Quero agendar uma avaliação');
 

@@ -5,6 +5,7 @@ import { audit, auditCtx } from './audit.js';
 import { decrypt, encrypt } from './crypto.js';
 import { ensureSchema } from './schema.js';
 import { answerClient } from './sara_client.js';
+import { isOpenNow, spClock } from './hours.js';
 
 // WhatsApp (Cloud API da Meta) por clínica: cadastro do número, webhook de entrada e resposta da Julia.
 // Token e segredo do app ficam cifrados e nunca voltam pela API; o webhook só processa mensagens com assinatura válida.
@@ -110,6 +111,16 @@ export default async function whatsapp(app) {
     return { ok: true };
   });
 
+  // ---------- Julia no WhatsApp: fora do expediente ela atende sozinha; no expediente só se a recepção ligar (vale só hoje) ----------
+  app.get('/integrations/whatsapp/julia', staff, async (req) => { await ensureSchema(); return juliaState(cid(req)); });
+  app.put('/integrations/whatsapp/julia', staff, async (req) => {
+    await ensureSchema();
+    const { help } = z.object({ help: z.boolean() }).parse(req.body);
+    await q('UPDATE clinics SET wa_julia_help_day = $2 WHERE id=$1', [cid(req), help ? spClock().date : null]);
+    await audit(auditCtx(req), help ? 'whatsapp.julia_on' : 'whatsapp.julia_off', 'clinic', cid(req));
+    return juliaState(cid(req));
+  });
+
   // ---------- caixa de entrada da equipe (estilo WhatsApp) ----------
   const phone = z.object({ contact: z.string().regex(/^\d{8,15}$/) });
   app.get('/integrations/whatsapp/conversations', staff, async (req) => {
@@ -199,6 +210,13 @@ export default async function whatsapp(app) {
     });
   });
 
+  async function juliaState(clinicId) {
+    const [c] = await q('SELECT working_hours, wa_julia_help_day::text AS help_day FROM clinics WHERE id=$1', [clinicId]);
+    const open = isOpenNow(c?.working_hours);
+    const help = !!c?.help_day && c.help_day === spClock().date;
+    return { open, help, active: !open || help };
+  }
+
   async function inbound(req, clinic, m, profileName) {
     const contact = digits(m.from);
     const text = m.type === 'text' ? m.text?.body
@@ -212,8 +230,13 @@ export default async function whatsapp(app) {
              ON CONFLICT (clinic_id, contact) DO UPDATE SET display_name = COALESCE(EXCLUDED.display_name, wa_contacts.display_name)`,
       [clinic.id, contact, profileName ? String(profileName).slice(0, 80) : null]);
 
-    const [st] = await q('SELECT human_until FROM wa_contacts WHERE clinic_id=$1 AND contact=$2', [clinic.id, contact]);
-    if (st?.human_until && new Date(st.human_until) > new Date()) return; // a equipe assumiu esta conversa
+    const julia = await juliaState(clinic.id);
+    if (!julia.active) return; // expediente e Julia desligada: só a recepção responde
+    const [st] = await q('SELECT human_until, handoff_reason FROM wa_contacts WHERE clinic_id=$1 AND contact=$2', [clinic.id, contact]);
+    // A equipe assumiu esta conversa. Fora do expediente, a pausa criada só por uma resposta da equipe não vale mais:
+    // a Julia volta. Pedido de atendente humano (ou erro) continua esperando uma pessoa.
+    const held = st?.human_until && new Date(st.human_until) > new Date() && !(!julia.open && st.handoff_reason === 'equipe respondeu');
+    if (held) return;
     const [{ n }] = await q(`SELECT count(*)::int n FROM wa_messages WHERE clinic_id=$1 AND contact=$2 AND direction='in' AND created_at > now() - interval '1 hour'`, [clinic.id, contact]);
     if (n > 40) return; // flood: guarda a mensagem, não gasta modelo
 
