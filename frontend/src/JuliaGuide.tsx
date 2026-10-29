@@ -5,7 +5,7 @@ import Mascote, { type Mood } from './Mascote';
 
 // Julia como guia dentro do app: fica no canto, explica cada tela na primeira visita, avisa o que há para fazer
 // e responde dúvidas sobre a tela atual (usa a mesma Julia do chat, via /sara/chat).
-export type Nudge = { key: string; text: string; action?: { label: string; run: () => void } };
+export type Nudge = { key: string; text: string; views?: string[]; action?: { label: string; run: () => void } };
 type Tip = { label: string; title: string; text: string; ask: string[] };
 
 const TIPS: Record<string, Tip> = {
@@ -41,7 +41,7 @@ const markNudged = (k: string) => { try { sessionStorage.setItem(`neri.nudge.${k
 type Bubble = { kind: 'tip' | 'nudge'; title: string; text: string; ask?: string[]; action?: Nudge['action']; nudgeKey?: string };
 type Msg = { role: 'user' | 'julia'; text: string };
 
-export default function JuliaGuide({ view, userKey, nudges }: { view: string; userKey: string; nudges: Nudge[] }) {
+export default function JuliaGuide({ view, userKey, nudges, context, suggest }: { view: string; userKey: string; nudges: Nudge[]; context: string; suggest: string[] }) {
   const tip = TIPS[view];
   const [bubble, setBubble] = useState<Bubble | null>(null);
   const [open, setOpen] = useState(false);
@@ -77,7 +77,9 @@ export default function JuliaGuide({ view, userKey, nudges }: { view: string; us
   useEffect(() => { const id = setInterval(() => setTick((n) => n + 1), 120_000); return () => clearInterval(id); }, []);
   const nudgeSig = nudges.map((n) => n.key + n.text).join('|');
   useEffect(() => {
-    const n = nudges.find((x) => Date.now() - nudgedAt(x.key) > NUDGE_EVERY);
+    // Avisos ligados à tela atual vêm primeiro (ex.: estoque baixo na tela de Estoque).
+    const ready = nudges.filter((x) => Date.now() - nudgedAt(x.key) > NUDGE_EVERY);
+    const n = ready.find((x) => x.views?.includes(view)) ?? ready[0];
     if (!n) return;
     const t = setTimeout(() => {
       if (showing.current) return;
@@ -103,7 +105,7 @@ export default function JuliaGuide({ view, userKey, nudges }: { view: string; us
     setMsgs((m) => [...m, { role: 'user', text: q }]); setBusy(true);
     try {
       const r = await api<{ conversationId: string; reply: string }>('/sara/chat', {
-        method: 'POST', json: { message: `[O usuário está na tela "${tip?.label ?? view}" do aplicativo e pede ajuda para usá-la] ${q}`, conversationId: convo.current } });
+        method: 'POST', json: { message: `[O usuário está na tela "${tip?.label ?? view}" do aplicativo e pede ajuda para usá-la]${context ? ` [Contexto real: ${context}]` : ''} ${q}`, conversationId: convo.current } });
       convo.current = r.conversationId;
       setMsgs((m) => [...m, { role: 'julia', text: r.reply }]);
       setTalking(true); setTimeout(() => setTalking(false), 3000);
@@ -131,7 +133,7 @@ export default function JuliaGuide({ view, userKey, nudges }: { view: string; us
             <div ref={end} />
           </div>
           {!msgs.length && tip && (
-            <div className="jg-chips">{tip.ask.map((q) => <button key={q} className="chip" onClick={() => ask(q)}>{q}</button>)}</div>
+            <div className="jg-chips">{[...suggest, ...tip.ask].slice(0, 3).map((q) => <button key={q} className="chip" onClick={() => ask(q)}>{q}</button>)}</div>
           )}
           <form className="jg-form" onSubmit={submit}>
             <input ref={input} value={text} onChange={(e) => setText(e.target.value)} maxLength={500} placeholder="Como faço…?" aria-label="Pergunte à Julia" />
@@ -147,7 +149,7 @@ export default function JuliaGuide({ view, userKey, nudges }: { view: string; us
           <p>{bubble.text}</p>
           <div className="jg-actions">
             {bubble.action && <button className="primary sm" onClick={() => { bubble.action!.run(); setBubble(null); }}>{bubble.action.label}</button>}
-            <button className="ghost sm" onClick={() => { setOpen(true); setBubble(null); }}>Perguntar</button>
+            <button className="ghost sm" onClick={() => { const b = bubble; if (b.kind === 'nudge') ask(`Me explique este aviso: ${b.text} Quem cuida disso e qual é o próximo passo?`); else { setOpen(true); setBubble(null); } }}>{bubble.kind === 'nudge' ? 'Explicar' : 'Perguntar'}</button>
           </div>
         </div>
       )}

@@ -124,12 +124,32 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
     receivables_overdue: { label: 'Ver contas', run: () => go('financeiro', 'contas') },
     lots_expired: { label: 'Ver lotes', run: () => go('estoque') },
     lots_expiring: { label: 'Ver lotes', run: () => go('estoque') },
-    restock: { label: 'Ver estoque', run: () => go('estoque') },
   };
   const URGENCY = { high: 0, medium: 1, low: 2 };
+  const stockRows: { name: string; quantity: number; min_quantity: number }[] = (restock.data ?? []).map((p) => ({ name: p.name, quantity: Number(p.quantity), min_quantity: Number(p.min_quantity) }));
+  const outOf = stockRows.filter((p) => p.quantity <= 0), lowOf = stockRows.filter((p) => p.quantity > 0);
+  const names = (l: { name: string }[]) => l.slice(0, 3).map((p) => p.name).join(', ') + (l.length > 3 ? ` e mais ${l.length - 3}` : '');
+  const goStock = { label: 'Ver estoque', run: () => go('estoque') };
+  const OWNER_LABEL = { doctor: 'Doutora', secretary: 'Secretária', manager: 'Gerente' } as const;
+  const attItems = attn.data?.items ?? [];
+  const context = [
+    attItems.length ? `Avisos em "Precisa de atenção": ${attItems.slice(0, 6).map((i) => `${i.title}${i.detail ? ` (${i.detail})` : ''}, responsável: ${OWNER_LABEL[i.owner]}`).join('; ')}.` : '',
+    outOf.length ? `Sem estoque: ${names(outOf)}.` : '',
+    lowOf.length ? `No mínimo ou abaixo: ${lowOf.slice(0, 4).map((p) => `${p.name} (${p.quantity} de ${p.min_quantity})`).join(', ')}.` : '',
+    waUnread ? `${waUnread} mensagem(ns) de clientes não lidas no WhatsApp.` : '',
+  ].filter(Boolean).join(' ').slice(0, 1200);
+  const suggest = [
+    ...(view === 'estoque' || view === 'produtos' ? (stockRows.length ? ['Quais produtos preciso comprar primeiro?', 'Quanto devo repor de cada produto?'] : []) : []),
+    ...(view === 'financeiro' ? attItems.filter((i) => i.kind.endsWith('_overdue') && i.kind !== 'returns_overdue').slice(0, 1).map((i) => `O que significa: ${i.title}?`) : []),
+    ...(view === 'agenda' || view === 'inicio' ? attItems.filter((i) => i.kind === 'late_appointments').slice(0, 1).map(() => 'Quais atendimentos estão sem conclusão e o que faço?') : []),
+    ...(view === 'inicio' ? attItems.filter((i) => i.kind.startsWith('returns_')).slice(0, 1).map(() => 'Quais pacientes precisam de retorno?') : []),
+    ...(view === 'inicio' && attItems.length ? ['Explique meus avisos de atenção e quem cuida de cada um.'] : []),
+  ];
   const nudges: Nudge[] = [
+    ...(outOf.length ? [{ key: 'stock_out', views: ['estoque', 'produtos'], text: `Sem estoque: ${names(outOf)}. Precisa comprar.`, action: goStock }] : []),
+    ...(lowOf.length ? [{ key: 'stock_low', views: ['estoque', 'produtos'], text: `Estoque no mínimo: ${names(lowOf)}. Hora de repor.`, action: goStock }] : []),
     ...[...(attn.data?.items ?? [])].filter((i) => ATT_NUDGE[i.kind]).sort((a, b) => URGENCY[a.urgency] - URGENCY[b.urgency]).slice(0, 4)
-      .map((i) => ({ key: i.kind, text: `${i.title}${i.detail ? `: ${i.detail}` : ''}.`, action: ATT_NUDGE[i.kind] })),
+      .map((i) => ({ key: i.kind, text: `${i.title}${i.detail ? `: ${i.detail}` : ''}. Responsável: ${OWNER_LABEL[i.owner]}.`, views: i.kind.startsWith('returns_') || i.kind === 'late_appointments' ? ['inicio', 'agenda'] : i.kind.endsWith('_overdue') ? ['financeiro'] : undefined, action: ATT_NUDGE[i.kind] })),
     ...(waUnread ? [{ key: 'wa', text: `${waUnread} mensagem(ns) de clientes no WhatsApp para ler e responder.`, action: { label: 'Abrir WhatsApp', run: () => go('whatsapp') } }] : []),
   ];
 
@@ -162,7 +182,7 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
       </main>
 
       {view !== 'sara' && view !== 'whatsapp' && <BottomNav view={view} isManager={isManager} go={go} onQuick={() => setQuick(true)} onMenu={() => setOpen(true)} />}
-      {me && view !== 'sara' && <JuliaGuide view={view} userKey={me.email} nudges={nudges} />}
+      {me && view !== 'sara' && <JuliaGuide view={view} userKey={me.email} nudges={nudges} context={context} suggest={suggest} />}
       {quick && <QuickSheet actions={quickActions} onClose={() => setQuick(false)} />}
       {booking && <AppointmentSheet onClose={() => setBooking(false)} onCreated={() => { setBooking(false); setFresh((n) => n + 1); }} />}
 
