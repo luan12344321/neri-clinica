@@ -258,8 +258,10 @@ CREATE TABLE IF NOT EXISTS wa_contacts (
   display_name text,
   human_until timestamptz,                   -- enquanto no futuro, a Julia não responde (a equipe assumiu)
   handoff_reason text,
+  read_upto bigint NOT NULL DEFAULT 0,       -- última mensagem do cliente já vista pela equipe (wa_messages.id)
   PRIMARY KEY (clinic_id, contact)
 );
+ALTER TABLE wa_messages ADD COLUMN IF NOT EXISTS staff_user_id uuid;  -- preenchido quando a equipe (e não a Julia) enviou
 
 CREATE TABLE audit_log (                     -- LGPD: quem acessou/alterou o quê
   id bigserial PRIMARY KEY,

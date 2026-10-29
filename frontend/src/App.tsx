@@ -14,11 +14,12 @@ import { Settings, type Me } from './Settings';
 import { PresenceButton } from './Presence';
 import { Finance, RecentTransactions, type Bank, type FinTab } from './Finance';
 import PainelCiclo from './PainelCiclo';
+import WhatsApp, { BASE as WA_BASE, type Conversation } from './WhatsApp';
 import { BottomNav, InstallPill, QuickSheet, Splash, type QuickAction } from './Chrome';
 
-type View = 'inicio' | 'agenda' | 'financeiro' | 'estoque' | 'sara' | 'pacientes' | 'procedimentos' | 'produtos' | 'mensagens' | 'config';
+type View = 'inicio' | 'agenda' | 'financeiro' | 'estoque' | 'sara' | 'pacientes' | 'procedimentos' | 'produtos' | 'mensagens' | 'whatsapp' | 'config';
 
-const NAV: { group: string; items: { id: View; label: string; icon: IconName; mgr?: boolean }[] }[] = [
+const NAV: { group: string; items: { id: View; label: string; icon: IconName; mgr?: boolean; front?: boolean }[] }[] = [
   { group: 'Principal', items: [
     { id: 'inicio', label: 'Início', icon: 'home' },
     { id: 'agenda', label: 'Agenda', icon: 'calendar' },
@@ -35,7 +36,9 @@ const NAV: { group: string; items: { id: View; label: string; icon: IconName; mg
   ] },
   { group: 'Comunicação', items: [{ id: 'mensagens', label: 'Mensagens', icon: 'mail', mgr: true }] },
   { group: 'Conta', items: [{ id: 'config', label: 'Configurações', icon: 'gear' }] },
+  { group: 'Atendimento', items: [{ id: 'whatsapp', label: 'WhatsApp', icon: 'chat', front: true }] },
 ];
+const NAV_ITEMS = NAV.flatMap((g) => g.items);
 const TITLES = Object.fromEntries(NAV.flatMap((g) => g.items.map((i) => [i.id, i.label]))) as Record<View, string>;
 const TITLE_OVERRIDE: Partial<Record<View, string>> = { inicio: 'Início', sara: 'Julia' };
 
@@ -60,11 +63,17 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 }
 
 function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
-  const { isManager, isOwner } = useRole();
+  const { isManager, isOwner, role } = useRole();
+  const hasWa = role === 'owner' || role === 'manager' || role === 'reception'; // caixa do WhatsApp: quem atende o público
   const [view, setView] = useState<View>('inicio');
   const [open, setOpen] = useState(false);
   // Quem não é dono/gerente nunca fica numa tela restrita (ex.: Financeiro), mesmo que o perfil mude com o app aberto.
-  useEffect(() => { if (NAV.flatMap((g) => g.items).find((i) => i.id === view)?.mgr && !isManager) setView('inicio'); }, [view, isManager]);
+  useEffect(() => {
+    const it = NAV_ITEMS.find((i) => i.id === view);
+    if ((it?.mgr && !isManager) || (it?.front && !hasWa)) setView('inicio');
+  }, [view, isManager, hasWa]);
+  const wa = useLoad<Conversation[]>(hasWa ? WA_BASE : null, view === 'whatsapp' ? 15_000 : 60_000);
+  const waUnread = (wa.data ?? []).reduce((n, c) => n + c.unread, 0);
   // Estoque atual (não o aviso gravado pela rotina): some assim que o produto é reposto.
   const restock = useLoad<any[]>('/stock/restock');
   const menuBtn = useRef<HTMLButtonElement>(null);
@@ -104,7 +113,7 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
   const nAlerts = restock.data?.length ?? 0;
 
   return (
-    <div className={`shell${view === 'sara' ? ' on-sara' : ''}`}>
+    <div className={`shell${view === 'sara' || view === 'whatsapp' ? ' on-sara' : ''}`}>
       <header className="top">
         <button ref={menuBtn} className="icon-btn menu-btn" aria-label="Abrir menu" aria-expanded={open} onClick={() => setOpen(true)}><Icon name="menu" /></button>
         <h1>{TITLE_OVERRIDE[view] ?? TITLES[view]}</h1>
@@ -126,11 +135,12 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
         {view === 'financeiro' && <Finance initialTab={finTab} onTab={setFinTab} />}
         {view === 'estoque' && <Stock go={go} />}
         {view === 'sara' && <Julia name={me?.name} />}
+        {view === 'whatsapp' && hasWa && <WhatsApp list={wa} />}
         {(view === 'pacientes' || view === 'procedimentos' || view === 'mensagens') && <Cadastros section={view} autoOpen={autoPatient} focus={focus} onFinish={() => { go('inicio'); setFresh((n) => n + 1); }} />}
         {view === 'produtos' && <Cadastros section={'estoque' satisfies Section} />}
       </main>
 
-      {view !== 'sara' && <BottomNav view={view} isManager={isManager} go={go} onQuick={() => setQuick(true)} onMenu={() => setOpen(true)} />}
+      {view !== 'sara' && view !== 'whatsapp' && <BottomNav view={view} isManager={isManager} go={go} onQuick={() => setQuick(true)} onMenu={() => setOpen(true)} />}
       {quick && <QuickSheet actions={quickActions} onClose={() => setQuick(false)} />}
       {booking && <AppointmentSheet onClose={() => setBooking(false)} onCreated={() => { setBooking(false); setFresh((n) => n + 1); }} />}
 
@@ -142,12 +152,12 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
               <div className="drawer-title"><img src="/neri-n.png" alt="" /><div><strong>Clínica</strong><span>{me?.clinic ?? 'Gestão'}</span></div></div>
               <button className="icon-btn on-dark close-btn" aria-label="Fechar menu" onClick={() => { setOpen(false); menuBtn.current?.focus(); }}><Icon name="close" /></button>
             </div>
-            {NAV.map((g) => ({ ...g, items: g.items.filter((i) => !i.mgr || isManager) })).filter((g) => g.items.length).map((g) => (
+            {NAV.map((g) => ({ ...g, items: g.items.filter((i) => (!i.mgr || isManager) && (!i.front || hasWa)) })).filter((g) => g.items.length).map((g) => (
               <div key={g.group} className="nav-group">
                 <p>{g.group}</p>
                 {g.items.map((i) => (
                   <button key={i.id} aria-current={view === i.id ? 'page' : undefined} onClick={() => go(i.id)}>
-                    <Icon name={i.icon} size={20} />{i.label}
+                    <Icon name={i.icon} size={20} />{i.label}{i.id === 'whatsapp' && waUnread > 0 && <span className="nav-badge" aria-label={`${waUnread} não lidas`}>{waUnread}</span>}
                   </button>
                 ))}
               </div>

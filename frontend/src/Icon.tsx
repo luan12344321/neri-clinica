@@ -29,6 +29,7 @@ const PATHS = {
   bank: 'M3 10l9-6 9 6M5 10v8m4-8v8m6-8v8m4-8v8M3 20h18',
   share: 'M12 3v12m0-12L8 7m4-4l4 4M5 13v7h14v-7',
   qr: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 14h2v6h-4M14 18h2v2h-2z',
+  chat: 'M4 5h16v11H9l-5 4zM8 10h8M8 13h5',
   pulse: 'M3 12h4l2-6 4 12 2-6h6',
 } as const;
 
