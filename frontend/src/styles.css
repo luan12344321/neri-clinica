@@ -792,6 +792,14 @@ button.ghost.danger { color: var(--neg); border-color: color-mix(in srgb, var(--
 .jg-form button { flex: none; width: 44px; height: 44px; padding: 0; border-radius: 50%; display: grid; place-items: center; }
 @media (min-width: 1024px) { .julia-guide { right: 24px; bottom: 24px; } .julia-guide.v-whatsapp { bottom: 96px; } }
 @media (prefers-reduced-motion: reduce) { .jg-bubble, .jg-panel { animation: none; } }
+.role-hints { list-style: none; margin: 0; padding: 10px 0 8px; display: grid; gap: 6px; }
+.role-hints b { color: var(--ink); font-weight: 650; }
+/* celular: a Julia em tamanho menor e espaço no fim da página, para não esconder valores e o último item da lista */
+@media (max-width: 1023px) {
+  .jg-btn .mascote { width: 64px; height: auto; }
+  .jg-q { right: 0; top: 0; }
+  .shell { padding-bottom: calc(176px + env(safe-area-inset-bottom)); }
+}
 
 /* ---- Referências 29/10: lateral quase preta com item ativo em pílula, cartões sem borda e mais arredondados,
    números grandes. Um único destaque vivo por tela (--pop), sempre verde: a paleta continua bege, branco e verde. ---- */

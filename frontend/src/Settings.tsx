@@ -119,7 +119,7 @@ function Team() {
           )}
         </li>
       ))}</ul>
-      <p className="muted pad">{Object.entries(ROLE_HINT).map(([r, h]) => `${ROLE_LABEL[r as Role]}: ${h}`).join(' ')}</p>
+      <ul className="role-hints muted">{Object.entries(ROLE_HINT).map(([r, h]) => <li key={r}><b>{ROLE_LABEL[r as Role]}:</b> {h}</li>)}</ul>
       {adding && (
         <Sheet title="Novo usuário" onClose={() => setAdding(false)}>
           <AddForm label="Cadastrar" fields={fields} onSubmit={async (v) => { await api('/team', { method: 'POST', json: v }); list.reload(); setAdding(false); toast('Usuário cadastrado'); }} />
@@ -178,7 +178,7 @@ function AssistantCard() {
   );
 }
 
-// Conexão com o Asaas (confirmação automática de Pix). As chaves ficam nas variáveis do Netlify, nunca nesta tela.
+// Conexão com o Asaas (confirmação automática de Pix). As chaves ficam nas variáveis da Vercel, nunca nesta tela.
 function PaymentsCard() {
   const integ = useLoad<{ asaas: { configured: boolean; sandbox: boolean } }>('/integrations');
   const [state, setState] = useState<'idle' | 'busy' | 'ok' | 'fail'>('idle');
@@ -199,7 +199,7 @@ function PaymentsCard() {
       {a && !a.configured && (
         <ol className="steps">
           <li>Crie a conta no Asaas e gere uma <b>chave de API</b> (comece pelo ambiente de teste).</li>
-          <li>No Netlify, cadastre <b>ASAAS_API_KEY</b>, <b>ASAAS_WEBHOOK_TOKEN</b> (um segredo seu, de 32 a 255 caracteres) e <b>ASAAS_ENV</b> (<code>sandbox</code> ou <code>production</code>) e faça um novo deploy.</li>
+          <li>Na Vercel (Settings → Environment Variables), cadastre <b>ASAAS_API_KEY</b>, <b>ASAAS_WEBHOOK_TOKEN</b> (um segredo seu, de 32 a 255 caracteres) e <b>ASAAS_ENV</b> (<code>sandbox</code> ou <code>production</code>) e faça um novo deploy.</li>
           <li>No Asaas, em Integrações → Webhooks, cadastre o endereço abaixo, o mesmo segredo e os eventos de cobrança.</li>
         </ol>
       )}
