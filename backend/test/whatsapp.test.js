@@ -42,8 +42,12 @@ const fc = (name, args = {}) => ({ parts: [{ functionCall: { name, args } }] });
 const txt = (s) => ({ parts: [{ text: s }] });
 const ownerToken = () => t.tokenFor('gestor@demo.test');
 const receptionToken = () => t.tokenFor('recepcao@demo.test');
-const configure = async (extra = {}) => (await t.call('PUT', '/integrations/whatsapp', { token: await ownerToken(),
-  body: { number: '+55 11 90000-0000', phoneId: PHONE_ID, token: TOKEN, appSecret: SECRET, enabled: true, ...extra } }));
+const configure = async (extra = {}) => {
+  const r = await t.call('PUT', '/integrations/whatsapp', { token: await ownerToken(),
+    body: { number: '+55 11 90000-0000', phoneId: PHONE_ID, token: TOKEN, appSecret: SECRET, enabled: true, ...extra } });
+  await t.sql("UPDATE clinics SET wa_julia_help_day = (now() AT TIME ZONE 'America/Sao_Paulo')::date"); // Julia ligada hoje: os testes não dependem do horário do relógio
+  return r;
+};
 
 let n = 0;
 const payload = (from, text, id = `wamid.IN${++n}`, phoneId = PHONE_ID, type = 'text') => ({ object: 'whatsapp_business_account', entry: [{ id: '1', changes: [{ field: 'messages', value: {

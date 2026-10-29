@@ -42,6 +42,7 @@ export default function WhatsApp({ list }: { list: { data: Conversation[] | null
   return (
     <div className={`wa${active ? ' has-chat' : ''}`}>
       <section className="wa-list" aria-label="Conversas">
+        <JuliaSwitch />
         <div className="wa-tools">
           <label className="wa-search">
             <Icon name="search" size={18} />
@@ -78,6 +79,32 @@ export default function WhatsApp({ list }: { list: { data: Conversation[] | null
           ? <Thread key={active.contact} conv={active} onBack={() => setCurrent(null)} onChanged={list.reload} />
           : <div className="wa-blank"><Empty icon="mail" title="Escolha uma conversa" text="As mensagens dos clientes aparecem aqui. Ao responder, a Julia para de atender essa conversa." /></div>}
       </section>
+    </div>
+  );
+}
+
+// Fora do expediente a Julia atende sozinha (travado). No expediente a recepção liga para ajudar só hoje; desliga a qualquer hora.
+function JuliaSwitch() {
+  const st = useLoad<{ open: boolean; help: boolean; active: boolean }>('/integrations/whatsapp/julia', 60_000);
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  if (!st.data) return null;
+  const { open, help } = st.data;
+  async function flip() {
+    setBusy(true);
+    try { await api('/integrations/whatsapp/julia', { method: 'PUT', json: { help: !help } }); st.reload(); toast(help ? 'Julia desligada. Só a recepção responde.' : 'Julia ajudando no atendimento hoje.'); }
+    catch { toast('Não foi possível mudar. Tente de novo.'); }
+    finally { setBusy(false); }
+  }
+  const on = !open || help;
+  return (
+    <div className={`wa-julia${on ? ' on' : ''}`}>
+      <span className="wa-julia-ico"><Icon name="spark" size={20} /></span>
+      <div className="wa-julia-text">
+        <b>{!open ? 'Julia atendendo' : help ? 'Julia ajudando hoje' : 'Julia desligada'}</b>
+        <span className="muted">{!open ? 'Fora do expediente ela responde todas as mensagens.' : help ? 'Responde os contatos que você não assumir. Desliga sozinha à meia-noite.' : 'Só a recepção responde. Ligue em dia corrido.'}</span>
+      </div>
+      <button role="switch" aria-checked={on} aria-label="Julia no WhatsApp" className="switch" disabled={!open || busy} onClick={flip}><span /></button>
     </div>
   );
 }

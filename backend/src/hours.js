@@ -9,6 +9,19 @@ import { ensureSchema } from './schema.js';
 const WORK = [['08:00', '11:00'], ['13:00', '18:00']];
 export const DEFAULT_HOURS = { 0: [], 1: WORK, 2: WORK, 3: WORK, 4: WORK, 5: WORK, 6: [] };
 
+const TZ = 'America/Sao_Paulo';
+// Data (YYYY-MM-DD) e minuto do dia em São Paulo, e se a clínica está dentro de alguma faixa do expediente.
+export function spClock(now = new Date()) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    .formatToParts(now).map((x) => [x.type, x.value]));
+  const date = `${p.year}-${p.month}-${p.day}`;
+  return { date, minutes: Number(p.hour) * 60 + Number(p.minute), weekday: new Date(`${date}T12:00:00Z`).getUTCDay() };
+}
+export function isOpenNow(workingHours, now = new Date()) {
+  const { minutes, weekday } = spClock(now);
+  return ((workingHours ?? DEFAULT_HOURS)[weekday] ?? []).some(([s, e]) => minutes >= toMin(s) && minutes < toMin(e));
+}
+
 const time = z.string().regex(/^([01]\d|2[0-3]):(00|30)$/, 'horário em HH:00 ou HH:30');
 const toMin = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
 const day = z.array(z.tuple([time, time])).max(3).superRefine((faixas, ctx) => {
