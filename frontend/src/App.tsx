@@ -78,6 +78,7 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
   const waUnread = (wa.data ?? []).reduce((n, c) => n + c.unread, 0);
   // Estoque atual (não o aviso gravado pela rotina): some assim que o produto é reposto.
   const restock = useLoad<any[]>('/stock/restock');
+  const attn = useLoad<{ items: AttItem[] }>('/attention', 120_000); // alimenta os avisos da Julia no canto
   const menuBtn = useRef<HTMLButtonElement>(null);
 
   // Sinal de vida: avisa o servidor que este usuário está com o app aberto (alimenta o painel "Equipe" do proprietário).
@@ -113,8 +114,22 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
     ] : []),
   ];
   const nAlerts = restock.data?.length ?? 0;
+  const toSection = (id: string) => { go('inicio'); setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' }), 500); };
+  const ATT_NUDGE: Record<string, { label: string; run: () => void } | undefined> = {
+    late_appointments: { label: 'Ver no Início', run: () => toSection('agenda-hoje') },
+    returns_overdue: { label: 'Ver retornos', run: () => toSection('retornos-do-dia') },
+    returns_closing: { label: 'Ver retornos', run: () => toSection('retornos-do-dia') },
+    returns_window: { label: 'Ver retornos', run: () => toSection('retornos-do-dia') },
+    payables_overdue: { label: 'Ver contas', run: () => go('financeiro', 'contas') },
+    receivables_overdue: { label: 'Ver contas', run: () => go('financeiro', 'contas') },
+    lots_expired: { label: 'Ver lotes', run: () => go('estoque') },
+    lots_expiring: { label: 'Ver lotes', run: () => go('estoque') },
+    restock: { label: 'Ver estoque', run: () => go('estoque') },
+  };
+  const URGENCY = { high: 0, medium: 1, low: 2 };
   const nudges: Nudge[] = [
-    ...(nAlerts ? [{ key: 'restock', text: `${nAlerts} produto(s) para repor: ${restock.data!.map((p) => p.name).slice(0, 3).join(', ')}${nAlerts > 3 ? '…' : ''}.`, action: { label: 'Ver estoque', run: () => go('estoque') } }] : []),
+    ...[...(attn.data?.items ?? [])].filter((i) => ATT_NUDGE[i.kind]).sort((a, b) => URGENCY[a.urgency] - URGENCY[b.urgency]).slice(0, 4)
+      .map((i) => ({ key: i.kind, text: `${i.title}${i.detail ? `: ${i.detail}` : ''}.`, action: ATT_NUDGE[i.kind] })),
     ...(waUnread ? [{ key: 'wa', text: `${waUnread} mensagem(ns) de clientes no WhatsApp para ler e responder.`, action: { label: 'Abrir WhatsApp', run: () => go('whatsapp') } }] : []),
   ];
 

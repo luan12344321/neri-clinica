@@ -73,6 +73,8 @@ export default function JuliaGuide({ view, userKey, nudges }: { view: string; us
   }, [view, userKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 2) Avisos do que há para fazer (estoque, mensagens…): um por vez, sem repetir por 30 min e sem atrapalhar.
+  const [tick, setTick] = useState(0);
+  useEffect(() => { const id = setInterval(() => setTick((n) => n + 1), 120_000); return () => clearInterval(id); }, []);
   const nudgeSig = nudges.map((n) => n.key + n.text).join('|');
   useEffect(() => {
     const n = nudges.find((x) => Date.now() - nudgedAt(x.key) > NUDGE_EVERY);
@@ -83,7 +85,7 @@ export default function JuliaGuide({ view, userKey, nudges }: { view: string; us
       say({ kind: 'nudge', title: 'Tem coisa para fazer', text: n.text, action: n.action, nudgeKey: n.key }, 20_000);
     }, 6_000);
     return () => clearTimeout(t);
-  }, [nudgeSig, view]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [nudgeSig, view, tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [msgs, busy, open]);
   useEffect(() => { if (open) input.current?.focus(); }, [open]);
@@ -152,7 +154,7 @@ export default function JuliaGuide({ view, userKey, nudges }: { view: string; us
 
       <button className="jg-btn" aria-label={open ? 'Fechar ajuda da Julia' : 'Abrir ajuda da Julia'} aria-expanded={open}
         onClick={() => { setBubble(null); setOpen((o) => !o); }}>
-        <Mascote variant="head" size={64} mood={mood} label="" />
+        <Mascote variant="full" size={104} mood={mood} label="" />
         <span className="jg-q" aria-hidden="true">?</span>
       </button>
     </div>
