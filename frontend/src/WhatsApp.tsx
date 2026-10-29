@@ -47,7 +47,7 @@ export default function WhatsApp({ list }: { list: { data: Conversation[] | null
         <div className="wa-tools">
           <label className="wa-search">
             <Icon name="search" size={18} />
-            <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar nome ou telefone" aria-label="Buscar conversa" />
+            <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nome ou telefone" aria-label="Buscar conversa" />
           </label>
           <button className={`chip${onlyUnread ? ' on' : ''}`} aria-pressed={onlyUnread} onClick={() => setOnlyUnread((v) => !v)}>
             Não lidas{total > 0 ? ` (${total})` : ''}

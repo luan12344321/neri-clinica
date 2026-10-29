@@ -43,6 +43,8 @@ const NAV: { group: string; items: { id: View; label: string; icon: IconName; mg
 const NAV_ITEMS = NAV.flatMap((g) => g.items);
 const TITLES = Object.fromEntries(NAV.flatMap((g) => g.items.map((i) => [i.id, i.label]))) as Record<View, string>;
 const TITLE_OVERRIDE: Partial<Record<View, string>> = { inicio: 'Início', sara: 'Julia' };
+// A tela aberta fica no endereço (#/agenda...): o "voltar" do navegador/celular troca de tela e recarregar não perde o lugar.
+const viewFromHash = (h: string) => { const id = h.replace(/^#\//, ''); return NAV_ITEMS.some((i) => i.id === id) ? (id as View) : null; };
 
 const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'; };
 const initials = (name = '') => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('') || '·';
@@ -67,13 +69,23 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
   const { isManager, isOwner, role } = useRole();
   const hasWa = role === 'owner' || role === 'manager' || role === 'reception'; // caixa do WhatsApp: quem atende o público
-  const [view, setView] = useState<View>('inicio');
+  const [view, setView] = useState<View>(() => viewFromHash(location.hash) ?? 'inicio');
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const h = `#/${view}`;
+    if (!location.hash) history.replaceState(null, '', h);
+    else if (location.hash !== h) location.hash = h;
+  }, [view]);
+  useEffect(() => {
+    const f = () => { const v = viewFromHash(location.hash); if (v) { setView(v); setOpen(false); scrollTo({ top: 0 }); } };
+    addEventListener('hashchange', f);
+    return () => removeEventListener('hashchange', f);
+  }, []);
   // Quem não é dono/gerente nunca fica numa tela restrita (ex.: Financeiro), mesmo que o perfil mude com o app aberto.
   useEffect(() => {
     const it = NAV_ITEMS.find((i) => i.id === view);
-    if ((it?.mgr && !isManager) || (it?.front && !hasWa)) setView('inicio');
-  }, [view, isManager, hasWa]);
+    if (role && ((it?.mgr && !isManager) || (it?.front && !hasWa))) setView('inicio'); // espera o perfil carregar: senão o link direto (#/financeiro) sempre cairia no Início
+  }, [view, isManager, hasWa, role]);
   const wa = useLoad<Conversation[]>(hasWa ? WA_BASE : null, view === 'whatsapp' ? 15_000 : 60_000);
   const waUnread = (wa.data ?? []).reduce((n, c) => n + c.unread, 0);
   // Estoque atual (não o aviso gravado pela rotina): some assim que o produto é reposto.
