@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ApiError, api } from './api';
 import { useLoad } from './hooks';
 import { Icon } from './Icon';
+import Mascote from './Mascote';
 import { Avatar, Empty, ListSkeleton, useToast } from './ui';
 
 export type Conversation = { contact: string; name: string | null; patient: string | null; human: boolean; reason: string | null;
@@ -99,7 +100,7 @@ function JuliaSwitch() {
   const on = !open || help;
   return (
     <div className={`wa-julia${on ? ' on' : ''}`}>
-      <span className="wa-julia-ico"><Icon name="spark" size={20} /></span>
+      <span className="wa-julia-ico"><Mascote variant="head" size={34} mood={on ? 'happy' : 'idle'} label="" /></span>
       <div className="wa-julia-text">
         <b>{!open ? 'Julia atendendo' : help ? 'Julia ajudando hoje' : 'Julia desligada'}</b>
         <span className="muted">{!open ? 'Fora do expediente ela responde todas as mensagens.' : help ? 'Responde os contatos que você não assumir. Desliga sozinha à meia-noite.' : 'Só a recepção responde. Ligue em dia corrido.'}</span>
