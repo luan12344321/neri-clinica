@@ -125,6 +125,8 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
       { icon: 'bank' as const, title: 'Adicionar banco', hint: 'Onde o dinheiro cai', run: () => go('financeiro', 'bancos') },
     ] : []),
   ];
+  // abre a ficha do paciente (e, se vier, o atendimento) — usado pelo Início e pela Agenda
+  const openPatient = (patientId: string, appt: any | null) => { go('pacientes'); setFocus({ id: patientId, appt: appt ? { id: appt.id, label: `${appt.procedure ?? 'Atendimento'} · ${new Date(appt.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` } : undefined }); };
   const nAlerts = restock.data?.length ?? 0;
   const toSection = (id: string) => { go('inicio'); setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' }), 500); };
   const ATT_NUDGE: Record<string, { label: string; run: () => void } | undefined> = {
@@ -182,9 +184,9 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
 
       <main>
         {view === 'inicio' && <Today key={fresh} name={me?.name} restock={restock.data ?? []} go={go} money={isManager} onBook={() => setBooking(true)} onPatient={() => { go('pacientes'); setAutoPatient(true); }}
-          onStart={(patientId, appt) => { go('pacientes'); setFocus({ id: patientId, appt: appt ? { id: appt.id, label: `${appt.procedure ?? 'Atendimento'} · ${new Date(appt.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` } : undefined }); }} />}
+          onStart={openPatient} />}
         {view === 'config' && <Settings me={me} />}
-        {view === 'agenda' && <Agenda key={fresh} />}
+        {view === 'agenda' && <Agenda key={fresh} onStart={openPatient} />}
         {view === 'financeiro' && <Finance initialTab={finTab} onTab={setFinTab} />}
         {view === 'estoque' && <Stock go={go} />}
         {view === 'sara' && <Julia name={me?.name} />}
@@ -548,10 +550,25 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
 }
 
 // ---------- Agenda ----------
-function Agenda() {
-  const from = new Date().toISOString().slice(0, 10);
-  const to = new Date(Date.now() + 6 * 864e5).toISOString().slice(0, 10);
+// dia no fuso da clínica (toISOString é UTC: depois das 21h já seria amanhã e os atendimentos da noite sumiriam)
+const dayISO = (plusDays = 0) => new Date(Date.now() + plusDays * 864e5).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+
+function Agenda({ onStart }: { onStart: (patientId: string, appt: any | null) => void }) {
+  const { isClinical } = useRole();
+  const [week, setWeek] = useState(0); // 0 = a partir de hoje; cada passo anda 7 dias
+  const from = dayISO(week * 7), to = dayISO(week * 7 + 6);
   const ap = useLoad<any[]>(`/appointments?from=${from}&to=${to}`);
+  const [open, setOpen] = useState<any | null>(null);
+  const [moving, setMoving] = useState<any | null>(null);
+  const [concluding, setConcluding] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function complete(id: string) {
+    if (isClinical) { setOpen(null); setConcluding(id); return; } // mesma regra do Início: perfil clínico confirma a baixa de estoque
+    setBusy(true);
+    try { await api(`/appointments/${id}/complete`, { method: 'POST', json: {} }); setOpen(null); ap.reload(); }
+    finally { setBusy(false); }
+  }
+  const range = `${new Date(`${from}T12:00`).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })} a ${new Date(`${to}T12:00`).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })}`;
   const days = new Map<string, any[]>();
   for (const a of ap.data ?? []) {
     const k = new Date(a.starts_at).toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -560,25 +577,37 @@ function Agenda() {
   const STATUS: Record<string, string> = { scheduled: 'Agendado', confirmed: 'Confirmado', done: 'Concluído', canceled: 'Cancelado', no_show: 'Faltou' };
   return (
     <>
-      <div className="between"><p className="muted">Próximos 7 dias</p><NewAppointment onCreated={ap.reload} /></div>
+      <div className="between">
+        <div className="week-nav">
+          <button className="icon-btn" aria-label="Semana anterior" disabled={week === 0} onClick={() => setWeek((w) => w - 1)}><Icon name="back" size={20} /></button>
+          <p className="muted" aria-live="polite">{week === 0 ? 'Próximos 7 dias' : range}</p>
+          <button className="icon-btn fwd" aria-label="Próxima semana" onClick={() => setWeek((w) => w + 1)}><Icon name="back" size={20} /></button>
+        </div>
+        <NewAppointment onCreated={ap.reload} />
+      </div>
       <Status error={ap.error} loading={!ap.data} />
-      {ap.data && days.size === 0 && <section className="card"><Empty icon="calendar" title="Agenda livre" text="Nenhum atendimento nos próximos 7 dias." /></section>}
+      {ap.data && days.size === 0 && <section className="card"><Empty icon="calendar" title="Agenda livre" text={week === 0 ? 'Nenhum atendimento nos próximos 7 dias.' : `Nenhum atendimento de ${range}`} /></section>}
       {[...days].map(([day, items]) => (
-        <section key={day} className="card">
-          <h2 className="cap">{day}</h2>
+        <section key={day} className="card list-card">
+          <h2 className="cap pad">{day}</h2>
           <ul className="rows">
             {items.map((a) => (
               <li key={a.id}>
-                <div>
-                  <b>{new Date(a.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</b>{' '}{a.patient}
-                  <div className="muted">{a.procedure ?? 'Sem procedimento'}</div>
-                </div>
-                <span className={`pill ${a.status === 'done' ? 'ok' : a.status === 'canceled' || a.status === 'no_show' ? 'warn' : ''}`}>{STATUS[a.status] ?? a.status}</span>
+                <button className="row-btn" onClick={() => setOpen(a)} disabled={a.status === 'canceled'}>
+                  <b className="appt-time">{new Date(a.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</b>
+                  <span className="grow"><b>{a.patient}</b><span className="muted">{a.procedure ?? 'Sem procedimento'}</span></span>
+                  <span className={`pill ${a.status === 'done' ? 'ok' : a.status === 'canceled' || a.status === 'no_show' ? 'warn' : ''}`}>{STATUS[a.status] ?? a.status}</span>
+                </button>
               </li>
             ))}
           </ul>
         </section>
       ))}
+      {open && <ApptSheet appt={open} clinical={isClinical} busy={busy} onClose={() => setOpen(null)}
+        onStart={() => { const a = open; setOpen(null); onStart(a.patient_id, a); }} onChart={() => { const a = open; setOpen(null); onStart(a.patient_id, null); }}
+        onComplete={() => complete(open.id)} onMove={() => { setMoving(open); setOpen(null); }} />}
+      {moving && <RescheduleSheet appt={moving} onClose={() => setMoving(null)} onDone={() => { setMoving(null); ap.reload(); }} />}
+      {concluding && <ConcluirAtendimento appointmentId={concluding} onClose={() => setConcluding('')} onDone={ap.reload} />}
     </>
   );
 }

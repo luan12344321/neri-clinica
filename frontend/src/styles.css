@@ -792,6 +792,11 @@ button.ghost.danger { color: var(--neg); border-color: color-mix(in srgb, var(--
 .jg-form button { flex: none; width: 44px; height: 44px; padding: 0; border-radius: 50%; display: grid; place-items: center; }
 @media (min-width: 1024px) { .julia-guide { right: 24px; bottom: 24px; } .julia-guide.v-whatsapp { bottom: 96px; } }
 @media (prefers-reduced-motion: reduce) { .jg-bubble, .jg-panel { animation: none; } }
+.week-nav { display: flex; align-items: center; gap: 2px; margin-left: -10px; }
+.week-nav .fwd .ico { transform: rotate(180deg); }
+.week-nav .icon-btn:disabled { opacity: .35; cursor: default; }
+.appt-time { flex: none; min-width: 48px; font-variant-numeric: tabular-nums; }
+.row-btn:disabled { opacity: .55; cursor: default; }
 .role-hints { list-style: none; margin: 0; padding: 10px 0 8px; display: grid; gap: 6px; }
 .role-hints b { color: var(--ink); font-weight: 650; }
 /* celular: a Julia em tamanho menor e espaço no fim da página, para não esconder valores e o último item da lista */
