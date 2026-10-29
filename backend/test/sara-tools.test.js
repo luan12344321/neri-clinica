@@ -166,3 +166,14 @@ test('remarcar e cancelar: confirmação obrigatória, disponibilidade revalidad
   }
   assert.ok(pro, 'usuário dono existe');
 });
+
+test('list_procedures: dá o id do procedimento para agendar; só ativos e só da própria clínica', async () => {
+  const r = await run(RECEPTION, 'list_procedures', {});
+  const lista = r.res.result.procedimentos;
+  assert.ok(lista.length >= 1);
+  assert.ok(lista.every((p) => /^[0-9a-f-]{36}$/.test(p.id) && p.duracaoMin > 0));
+  assert.ok(!('preco' in lista[0]), 'sem preço nem custo');
+  await t.sql('UPDATE procedures SET active=false WHERE clinic_id=$1', [A]);
+  assert.equal((await run(RECEPTION, 'list_procedures', {})).res.result.procedimentos.length, 0);
+  assert.equal((await run('b@demo.test', 'list_procedures', {}, B)).res.result.procedimentos.length, 0, 'outra clínica não vê');
+});
