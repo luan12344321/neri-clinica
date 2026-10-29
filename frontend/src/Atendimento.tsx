@@ -20,7 +20,7 @@ type Ctx = {
   products: Product[];
   returnRule: { targetDays: number } | null;
 };
-type Line = { key: number; productId: string; lotId: string | null; units: number; photo: string | null };
+type Line = { key: number; productId: string; lotId: string | null; units: number; photo: string | null; raw?: string }; // raw: texto digitado ("1," enquanto digita 1,5)
 type Result = {
   applications: { id: string; product: { name: string }; lot: { code: string } | null; units: number; cost?: number | null }[];
   totalCost?: number; missingCost?: boolean; margin?: { value: number; pct: number | null };
@@ -122,7 +122,8 @@ export function ConcluirAtendimento({ appointmentId, onClose, onDone }: { appoin
     try { patch(key, { photo: await shrink(f) }); } catch { setPhotoErr('Não foi possível usar essa foto. Tente outra.'); }
   }
 
-  const invalid = lines.some((l) => !(l.units > 0));
+  // sem unidades, ou mais unidades do que o lote escolhido tem (o servidor recusaria com insufficient_stock)
+  const invalid = lines.some((l) => !(l.units > 0) || l.units > (byId.get(l.productId)?.lots.find((x) => x.id === l.lotId)?.units ?? Infinity));
   async function confirm() {
     if (busy || invalid) return;
     setBusy(true); setErr('');
@@ -211,10 +212,10 @@ export function ConcluirAtendimento({ appointmentId, onClose, onDone }: { appoin
               </select>
               {!l.lotId && <p style={S.warn}>Sem lote: a baixa será só no produto e a rastreabilidade fica incompleta.</p>}
               <div style={S.stepper}>
-                <button type="button" style={S.step} aria-label={`Diminuir unidades de ${p!.name}`} onClick={() => patch(l.key, { units: Math.max(step, Math.round((l.units - step) * 100) / 100) })}>−</button>
-                <input style={S.num} inputMode="decimal" aria-label={`Unidades de ${p!.name}`} value={Number.isFinite(l.units) ? String(l.units).replace('.', ',') : ''}
-                  onChange={(e) => { const v = parseFloat(e.target.value.replace(',', '.')); patch(l.key, { units: Number.isFinite(v) ? v : 0 }); }} />
-                <button type="button" style={S.step} aria-label={`Aumentar unidades de ${p!.name}`} onClick={() => patch(l.key, { units: Math.round((l.units + step) * 100) / 100 })}>+</button>
+                <button type="button" style={S.step} aria-label={`Diminuir unidades de ${p!.name}`} onClick={() => patch(l.key, { raw: undefined, units: Math.max(step, Math.round((l.units - step) * 100) / 100) })}>−</button>
+                <input style={S.num} inputMode="decimal" aria-label={`Unidades de ${p!.name}`} value={l.raw ?? (Number.isFinite(l.units) ? String(l.units).replace('.', ',') : '')}
+                  onChange={(e) => { const raw = e.target.value; const v = parseFloat(raw.replace(',', '.')); patch(l.key, { raw, units: Number.isFinite(v) ? v : 0 }); }} />
+                <button type="button" style={S.step} aria-label={`Aumentar unidades de ${p!.name}`} onClick={() => patch(l.key, { raw: undefined, units: Math.round((l.units + step) * 100) / 100 })}>+</button>
                 <span className="muted">unidades</span>
               </div>
               {over && <p style={S.warn} role="alert">O lote tem só {fmtUnits(lot!.units)} un. Reduza ou escolha outro lote.</p>}
@@ -224,7 +225,7 @@ export function ConcluirAtendimento({ appointmentId, onClose, onDone }: { appoin
                 <label htmlFor={`ph-${l.key}`} className="ghost" tabIndex={-1} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 44, padding: '0 12px', border: '1px solid var(--line)', borderRadius: 10, cursor: 'pointer' }}>
                   {l.photo ? 'Trocar foto da etiqueta' : 'Fotografar etiqueta'}
                 </label>
-                {l.photo && <><span className="pill ok">Foto anexada</span><button type="button" className="ghost sm" style={{ minHeight: 44 }} onClick={() => patch(l.key, { photo: null })}>Tirar foto</button></>}
+                {l.photo && <><span className="pill ok">Foto anexada</span><button type="button" className="ghost sm" style={{ minHeight: 44 }} onClick={() => patch(l.key, { photo: null })}>Remover foto</button></>}
               </div>
             </section>
           );
