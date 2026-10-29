@@ -14,6 +14,7 @@ import { Settings, type Me } from './Settings';
 import { PresenceButton } from './Presence';
 import { Finance, RecentTransactions, type Bank, type FinTab } from './Finance';
 import PainelCiclo from './PainelCiclo';
+import Mascote, { type Mood } from './Mascote';
 import WhatsApp, { BASE as WA_BASE, type Conversation } from './WhatsApp';
 import { BottomNav, InstallPill, QuickSheet, Splash, type QuickAction } from './Chrome';
 
@@ -619,8 +620,11 @@ function Julia({ name }: { name?: string }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
+  const [spoke, setSpoke] = useState<Mood | null>(null); // reação depois da resposta (fala ou tristeza em erro)
   const convo = useRef<string | undefined>(undefined);
   const end = useRef<HTMLDivElement>(null);
+  const mood: Mood = busy ? 'think' : spoke ?? 'idle';
+  useEffect(() => { if (!spoke) return; const id = setTimeout(() => setSpoke(null), spoke === 'talk' ? 3200 : 3000); return () => clearTimeout(id); }, [spoke]);
   useEffect(() => { end.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs, busy]);
 
   async function send(message: string) {
@@ -629,24 +633,30 @@ function Julia({ name }: { name?: string }) {
     try {
       const r = await api<{ conversationId: string; reply: string }>('/sara/chat', { method: 'POST', json: { message, conversationId: convo.current } });
       convo.current = r.conversationId;
-      setMsgs((m) => [...m, { role: 'sara', text: r.reply }]);
+      setMsgs((m) => [...m, { role: 'sara', text: r.reply }]); setSpoke('talk');
     } catch (e) {
       const s = e instanceof ApiError ? e.status : 0;
       const text = s === 503 ? 'A Julia está indisponível no momento. Avise o administrador da clínica.'
         : s === 504 ? 'A Julia demorou demais para responder. Tente uma pergunta mais curta.'
         : s === 429 ? 'Limite de uso da Julia atingido (por minuto ou do mês). Aguarde um pouco ou avise o administrador.'
         : s === 403 ? 'Seu perfil não tem acesso à Julia.' : 'Não consegui responder agora.';
-      setMsgs((m) => [...m, { role: 'sara', text, retry: s === 403 ? undefined : message }]);
+      setMsgs((m) => [...m, { role: 'sara', text, retry: s === 403 ? undefined : message }]); setSpoke('sad');
     }
     finally { setBusy(false); }
   }
 
   return (
-    <div className="chat">
+    <div className={`chat${msgs.length ? ' has-dock' : ''}`}>
+      {msgs.length > 0 && (
+        <div className="julia-dock">
+          <Mascote variant="half" size={84} mood={mood} />
+          <div><b>Julia</b><span className="muted">{busy ? 'Pensando…' : spoke === 'talk' ? 'Respondendo' : spoke === 'sad' ? 'Não deu certo' : 'Pronta para ajudar'}</span></div>
+        </div>
+      )}
       <div className="log" aria-live="polite">
         {msgs.length === 0 && (
           <div className="intro">
-            <span className="sara-avatar"><Icon name="spark" size={34} /></span>
+            <div className="julia-hero"><Mascote size={190} mood={mood} greet /></div>
             <h2>Olá{name ? `, ${name.split(/\s+/)[0]}` : ''}</h2>
             <p className="muted">Eu sou a Julia. Pergunte sobre faturamento, pacientes, estoque ou finanças da clínica.</p>
             <div className="sugg">
