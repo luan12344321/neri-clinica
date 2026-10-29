@@ -10,7 +10,7 @@ after(() => t.close());
 const PHONE_ID = '123456789012', SECRET = 'segredo-do-app-meta', TOKEN = `EAAB${'x'.repeat(40)}`;
 const CLIENT = '551177770001';
 const realFetch = globalThis.fetch;
-let gemini, sent;
+let gemini, sent, outId = 0;
 
 beforeEach(async () => {
   await t.reset(); await t.addExtras();
@@ -24,8 +24,8 @@ beforeEach(async () => {
     }
     if (u.includes('graph.facebook.com') && init?.method === 'POST') {
       const b = JSON.parse(init.body);
-      sent.push({ to: b.to, text: b.text.body });
-      return json({ messages: [{ id: `wamid.OUT${sent.length}` }] });
+      if (b.text.body !== 'Oi, sou a Julia, assistente virtual da clínica.') sent.push({ to: b.to, text: b.text.body });
+      return json({ messages: [{ id: `wamid.OUT${++outId}` }] });
     }
     throw new Error(`fetch inesperado: ${u}`);
   };
@@ -65,8 +65,8 @@ test('lista conversas, abre, marca como lida e a equipe responde (pausa a Julia)
   assert.equal(list.json[0].last_direction, 'out');
 
   const msgs = await t.call('GET', `${base}/${CLIENT}/messages`, { token: tk });
-  assert.deepEqual(msgs.json.map((m) => m.direction), ['in', 'out']);
-  assert.equal(msgs.json[1].staff, false);
+  assert.deepEqual(msgs.json.map((m) => m.direction), ['in', 'out', 'out']);
+  assert.equal(msgs.json[2].staff, false);
   list = await t.call('GET', base, { token: tk });
   assert.equal(list.json[0].unread, 0, 'abrir marca como lida');
 
