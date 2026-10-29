@@ -30,7 +30,8 @@ afterEach(() => { globalThis.fetch = realFetch; });
 const owner = () => t.tokenFor('gestor@demo.test');
 const reception = () => t.tokenFor('recepcao@demo.test');
 const EVERY_DAY = (faixas) => ({ hours: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((d) => [d, faixas])) });
-const setHours = async (faixas) => assert.equal((await t.call('PUT', '/clinic/hours', { token: await owner(), body: EVERY_DAY(faixas) })).status, 200);
+// Grava direto no banco para poder usar até 24:00 (a API só aceita até 23:30): 'aberto' vale em qualquer hora do dia.
+const setHours = (faixas) => t.sql('UPDATE clinics SET working_hours=$1', [JSON.stringify(EVERY_DAY(faixas).hours)]);
 let n = 0;
 const inbound = (text) => {
   const raw = Buffer.from(JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: '1', changes: [{ field: 'messages', value: {
@@ -59,7 +60,7 @@ test('fora do expediente a Julia responde sozinha', async () => {
 });
 
 test('no expediente a Julia fica calada até a recepção ligar, e desliga de novo', async () => {
-  await setHours([['00:00', '23:30']]);
+  await setHours([['00:00', '24:00']]);
   const tk = await reception();
   assert.deepEqual(await julia(tk), { open: true, help: false, active: false });
   await inbound('Oi');
@@ -78,7 +79,7 @@ test('no expediente a Julia fica calada até a recepção ligar, e desliga de no
 });
 
 test('ligar vale só para o dia: no dia seguinte volta a ficar desligada', async () => {
-  await setHours([['00:00', '23:30']]);
+  await setHours([['00:00', '24:00']]);
   const tk = await reception();
   await t.call('PUT', '/integrations/whatsapp/julia', { token: tk, body: { help: true } });
   await t.sql(`UPDATE clinics SET wa_julia_help_day = wa_julia_help_day - 1`);
@@ -88,7 +89,7 @@ test('ligar vale só para o dia: no dia seguinte volta a ficar desligada', async
 });
 
 test('com a Julia ajudando, conversa assumida pela equipe fica com a equipe; fora do expediente a Julia retoma', async () => {
-  await setHours([['00:00', '23:30']]);
+  await setHours([['00:00', '24:00']]);
   const tk = await reception();
   await t.call('PUT', '/integrations/whatsapp/julia', { token: tk, body: { help: true } });
   await inbound('Oi');                                   // Julia responde (1)

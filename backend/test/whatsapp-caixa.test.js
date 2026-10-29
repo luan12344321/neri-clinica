@@ -52,7 +52,7 @@ const base = `/integrations/whatsapp/conversations`;
 
 test('lista conversas, abre, marca como lida e a equipe responde (pausa a Julia)', async () => {
   await configure();
-  await t.call('PUT', '/clinic/hours', { token: await owner(), body: { hours: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((d) => [d, [['00:00', '23:30']]])) } }); // sempre no expediente
+  await t.sql('UPDATE clinics SET working_hours=$1', [JSON.stringify(Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((d) => [d, [['00:00', '24:00']]])))]); // sempre no expediente
   gemini.push([{ text: 'Oi! Em que posso ajudar?' }]);
   await inbound(CLIENT, 'Quero agendar uma avaliação');
 

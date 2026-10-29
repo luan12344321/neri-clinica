@@ -15,6 +15,7 @@ import { PresenceButton } from './Presence';
 import { Finance, RecentTransactions, type Bank, type FinTab } from './Finance';
 import PainelCiclo from './PainelCiclo';
 import Mascote, { type Mood } from './Mascote';
+import JuliaGuide, { type Nudge } from './JuliaGuide';
 import WhatsApp, { BASE as WA_BASE, type Conversation } from './WhatsApp';
 import { BottomNav, InstallPill, QuickSheet, Splash, type QuickAction } from './Chrome';
 
@@ -112,6 +113,10 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
     ] : []),
   ];
   const nAlerts = restock.data?.length ?? 0;
+  const nudges: Nudge[] = [
+    ...(nAlerts ? [{ key: 'restock', text: `${nAlerts} produto(s) para repor: ${restock.data!.map((p) => p.name).slice(0, 3).join(', ')}${nAlerts > 3 ? '…' : ''}.`, action: { label: 'Ver estoque', run: () => go('estoque') } }] : []),
+    ...(waUnread ? [{ key: 'wa', text: `${waUnread} mensagem(ns) de clientes no WhatsApp para ler e responder.`, action: { label: 'Abrir WhatsApp', run: () => go('whatsapp') } }] : []),
+  ];
 
   return (
     <div className={`shell${view === 'sara' || view === 'whatsapp' ? ' on-sara' : ''}`}>
@@ -142,6 +147,7 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
       </main>
 
       {view !== 'sara' && view !== 'whatsapp' && <BottomNav view={view} isManager={isManager} go={go} onQuick={() => setQuick(true)} onMenu={() => setOpen(true)} />}
+      {me && view !== 'sara' && <JuliaGuide view={view} userKey={me.email} nudges={nudges} />}
       {quick && <QuickSheet actions={quickActions} onClose={() => setQuick(false)} />}
       {booking && <AppointmentSheet onClose={() => setBooking(false)} onCreated={() => { setBooking(false); setFresh((n) => n + 1); }} />}
 
