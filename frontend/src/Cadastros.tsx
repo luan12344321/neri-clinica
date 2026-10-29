@@ -10,8 +10,9 @@ import { RegraRetornoSheet } from './RegraRetorno';
 import { Avatar, Empty, ListSkeleton, PageHead, Sheet, useRole, useToast } from './ui';
 
 type Opt = { value: string; label: string };
-export type Field = { name: string; label: string; type?: 'text' | 'email' | 'password' | 'number' | 'date' | 'checkbox' | 'select' | 'textarea' | 'datetime-local';
-  options?: Opt[]; required?: boolean; def?: string | boolean; step?: string };
+export type Field = { name: string; label: string; type?: 'text' | 'email' | 'password' | 'number' | 'date' | 'checkbox' | 'select' | 'textarea' | 'datetime-local' | 'tel';
+  options?: Opt[]; required?: boolean; def?: string | boolean; step?: string;
+  numeric?: boolean; check?: (v: string) => string | null }; // check: erro do campo (ou null) antes de enviar; o servidor valida de novo
 type Values = Record<string, string | boolean>;
 
 const useList = useLoad;
@@ -33,16 +34,29 @@ export function AddForm({ fields, label, onSubmit }: { fields: Field[]; label: s
   const [v, setV] = useState<Values>(init);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [bad, setBad] = useState<Record<string, string>>({});
 
   async function submit(e: FormEvent) {
-    e.preventDefault(); setBusy(true); setErr('');
+    e.preventDefault(); setErr('');
+    const found = Object.fromEntries(fields.flatMap((f) => {
+      const val = String(v[f.name] ?? '').trim();
+      const msg = val && f.check ? f.check(val) : null;
+      return msg ? [[f.name, msg]] : [];
+    }));
+    setBad(found);
+    const first = Object.keys(found)[0];
+    if (first) { ((e.currentTarget as HTMLFormElement).elements.namedItem(first) as HTMLElement | null)?.focus(); return; }
+    setBusy(true);
     const out: Record<string, unknown> = {};
     for (const f of fields) {
       const val = v[f.name];
       if (f.type === 'checkbox') out[f.name] = !!val;
       else if (val !== '') out[f.name] = f.type === 'number' ? Number(val) : val;
     }
-    try { await onSubmit(out); setV(init()); } catch (x) { setErr(errText(x)); } finally { setBusy(false); }
+    try { await onSubmit(out); setV(init()); } catch (x) {
+      // a dica de senha do errText só faz sentido em formulário com senha
+      setErr(x instanceof ApiError && x.message === 'validation' && !fields.some((f) => f.type === 'password') ? 'Confira os campos preenchidos.' : errText(x));
+    } finally { setBusy(false); }
   }
   return (
     <form className="form" onSubmit={submit}>
@@ -58,9 +72,12 @@ export function AddForm({ fields, label, onSubmit }: { fields: Field[]; label: s
           ) : f.type === 'textarea' ? (
             <textarea rows={3} value={String(v[f.name])} required={f.required} onChange={(e) => setV({ ...v, [f.name]: e.target.value })} />
           ) : (
-            <input type={f.type ?? 'text'} autoComplete={f.type === 'password' ? 'new-password' : f.type === 'email' ? 'off' : undefined} step={f.step} inputMode={f.type === 'number' ? 'decimal' : undefined} value={String(v[f.name])}
-              required={f.required} onChange={(e) => setV({ ...v, [f.name]: e.target.value })} />
+            <input name={f.name} type={f.type ?? 'text'} autoComplete={f.type === 'password' ? 'new-password' : f.type === 'email' ? 'off' : f.type === 'tel' ? 'tel' : undefined} step={f.step}
+              inputMode={f.type === 'number' ? 'decimal' : f.type === 'tel' ? 'tel' : f.numeric ? 'numeric' : undefined} value={String(v[f.name])}
+              required={f.required} aria-invalid={bad[f.name] ? true : undefined} aria-describedby={bad[f.name] ? `${f.name}-err` : undefined}
+              onChange={(e) => { setV({ ...v, [f.name]: e.target.value }); if (bad[f.name]) setBad(({ [f.name]: _, ...rest }) => rest); }} />
           )}
+          {bad[f.name] && <span id={`${f.name}-err`} className="err">{bad[f.name]}</span>}
         </label>
       ))}
       {err && <p role="alert" className="err">{err}</p>}
@@ -252,7 +269,7 @@ function Patients({ autoOpen = false, focus = null, onFinish }: { autoOpen?: boo
           <li key={p.id}>
             <button className="row-btn" onClick={() => setOpen(p.id)}>
               <Avatar name={p.full_name} />
-              <span className="grow"><b>{p.full_name}</b><span className="muted">{p.phone ?? 'sem telefone'}</span></span>
+              <span className="grow"><b>{p.full_name}</b><span className="muted">{p.phone ? fmtPhone(p.phone) : 'sem telefone'}</span></span>
               {isBirthday(p.birth_date) ? <span className="pill hi">Aniversário hoje</span> : p.birth_date && <span className="muted">{dateBR(p.birth_date)}</span>}
             </button>
           </li>
@@ -263,8 +280,8 @@ function Patients({ autoOpen = false, focus = null, onFinish }: { autoOpen?: boo
           <AddForm label="Salvar paciente" onSubmit={async (v) => { await api('/patients', { method: 'POST', json: v }); l.reload(); setAdding(false); toast('Paciente cadastrado'); }} fields={[
             { name: 'fullName', label: 'Nome completo', required: true },
             { name: 'birthDate', label: 'Nascimento', type: 'date' },
-            { name: 'phone', label: 'Telefone (com DDD)' },
-            { name: 'cpf', label: 'CPF (opcional)' },
+            { name: 'phone', label: 'Telefone (com DDD)', type: 'tel', check: phoneCheck },
+            { name: 'cpf', label: 'CPF (opcional)', numeric: true, check: cpfCheck },
             { name: 'marketingConsent', label: 'Autoriza receber mensagens (aniversário, pós-procedimento)', type: 'checkbox' },
           ]} />
         </Sheet>
@@ -274,6 +291,21 @@ function Patients({ autoOpen = false, focus = null, onFinish }: { autoOpen?: boo
 }
 
 const fmtCpf = (d: string) => d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+
+// Aceita o número digitado de qualquer jeito (espaços, parênteses, traço, +55); mesmas regras do servidor
+// (normalizePhone em fila.js, normalizeCpf em crypto.js), para avisar antes de salvar e não depois.
+const digits = (s: string) => s.replace(/\D/g, '');
+export const phoneCheck = (v: string) => { const n = digits(v).length; return n >= 10 && n <= 14 ? null : 'Telefone com DDD, por exemplo (11) 98765-4321.'; };
+export function cpfCheck(v: string) {
+  const d = digits(v);
+  const dv = (len: number) => { let s = 0; for (let i = 0; i < len; i++) s += Number(d[i]) * (len + 1 - i); const r = (s * 10) % 11; return r === 10 ? 0 : r; };
+  return d.length === 11 && !/^(\d)\1{10}$/.test(d) && dv(9) === Number(d[9]) && dv(10) === Number(d[10]) ? null : 'CPF inválido. Confira os 11 números.';
+}
+// Telefone salvo como foi digitado: mostra agrupado quando são 10/11 dígitos (DDD + número); senão, como está.
+export const fmtPhone = (p: string) => {
+  const d = digits(p).replace(/^55(?=\d{10,11}$)/, '');
+  return d.length === 11 ? `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}` : d.length === 10 ? `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}` : p;
+};
 
 // Ficha clínica: CPF em claro e prontuário. A API só entrega a perfis clínicos e registra cada acesso.
 function PatientDetail({ id, onClose, session, onFinish }: { id: string; onClose: () => void; session?: { id: string; label: string }; onFinish?: () => void }) {
@@ -307,7 +339,7 @@ function PatientDetail({ id, onClose, session, onFinish }: { id: string; onClose
                 {allergy && <span className="pill warn" style={{ marginBottom: 6 }}>Alergia: {allergy.length > 40 ? `${allergy.slice(0, 40)}…` : allergy}</span>}
                 <dl className="facts">
                   <dt>CPF</dt><dd>{p.data.cpf ? fmtCpf(p.data.cpf) : '—'}</dd>
-                  <dt>Telefone</dt><dd>{p.data.phone ?? '—'}</dd>
+                  <dt>Telefone</dt><dd>{p.data.phone ? fmtPhone(p.data.phone) : '—'}</dd>
                   <dt>Nascimento</dt><dd>{p.data.birth_date ? dateBR(p.data.birth_date) : '—'}</dd>
                 </dl>
               </div>
