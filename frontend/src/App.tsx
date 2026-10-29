@@ -3,13 +3,13 @@ import { useLoad } from './hooks';
 import { Area, AreaChart, Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { ApiError, api, brl, getToken, lastMonths, monthLabel, setToken, thisMonth } from './api';
 import { Icon, type IconName } from './Icon';
-import { AppointmentSheet, Cadastros, NewAppointment, RescheduleSheet, type Focus, type Section } from './Cadastros';
+import { AppointmentSheet, Cadastros, NewAppointment, RescheduleSheet, errText, type Focus, type Section } from './Cadastros';
 import { ApptSheet, DayStrip, DayTimeline, ageOf, isLate } from './Timeline';
 import { ConcluirAtendimento } from './Atendimento';
 import { AtencaoLista, RetornosDoDia, type AttItem } from './RetornosDoDia';
 import { useHours } from './hours';
 import { LegalLinks, LegalPage, TermsGate, legalFromHash } from './Legal';
-import { Avatar, Empty, ErrorBoundary, EyeToggle, ListSkeleton, RoleProvider, ToastProvider, mask, useHideValues, useRole } from './ui';
+import { Avatar, Empty, ErrorBoundary, EyeToggle, ListSkeleton, RoleProvider, ToastProvider, mask, useHideValues, useRole, useToast } from './ui';
 import { Settings, type Me } from './Settings';
 import { PresenceButton } from './Presence';
 import { Finance, RecentTransactions, type Bank, type FinTab } from './Finance';
@@ -46,6 +46,8 @@ const TITLE_OVERRIDE: Partial<Record<View, string>> = { inicio: 'Início', sara:
 // A tela aberta fica no endereço (#/agenda...): o "voltar" do navegador/celular troca de tela e recarregar não perde o lugar.
 const viewFromHash = (h: string) => { const id = h.replace(/^#\//, ''); return NAV_ITEMS.some((i) => i.id === id) ? (id as View) : null; };
 
+const completeErr = (e: unknown) => e instanceof ApiError && e.status === 409
+  ? 'Este atendimento não pode mais ser concluído (já foi concluído, cancelado ou marcado como falta).' : errText(e);
 const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'; };
 const initials = (name = '') => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('') || '·';
 const pct = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
@@ -82,10 +84,13 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
     return () => removeEventListener('hashchange', f);
   }, []);
   // Quem não é dono/gerente nunca fica numa tela restrita (ex.: Financeiro), mesmo que o perfil mude com o app aberto.
+  // Enquanto o perfil carrega, a tela restrita não é montada (nada de pedir dados que o servidor recusaria);
+  // com o perfil, sem acesso volta ao Início substituindo a entrada do histórico (senão o "voltar" ficaria preso entre as duas).
+  const it = NAV_ITEMS.find((i) => i.id === view);
+  const blocked = !!((it?.mgr && !isManager) || (it?.front && !hasWa));
   useEffect(() => {
-    const it = NAV_ITEMS.find((i) => i.id === view);
-    if (role && ((it?.mgr && !isManager) || (it?.front && !hasWa))) setView('inicio'); // espera o perfil carregar: senão o link direto (#/financeiro) sempre cairia no Início
-  }, [view, isManager, hasWa, role]);
+    if (role && blocked) { history.replaceState(null, '', '#/inicio'); setView('inicio'); }
+  }, [role, blocked]);
   const wa = useLoad<Conversation[]>(hasWa ? WA_BASE : null, view === 'whatsapp' ? 15_000 : 60_000);
   const waUnread = (wa.data ?? []).reduce((n, c) => n + c.unread, 0);
   // Estoque atual (não o aviso gravado pela rotina): some assim que o produto é reposto.
@@ -183,6 +188,7 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
       </header>
 
       <main>
+        {blocked ? <ListSkeleton rows={3} /> : <>
         {view === 'inicio' && <Today key={fresh} name={me?.name} restock={restock.data ?? []} go={go} money={isManager} onBook={() => setBooking(true)} onPatient={() => { go('pacientes'); setAutoPatient(true); }}
           onStart={openPatient} />}
         {view === 'config' && <Settings me={me} />}
@@ -193,6 +199,7 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
         {view === 'whatsapp' && hasWa && <WhatsApp list={wa} />}
         {(view === 'pacientes' || view === 'procedimentos' || view === 'mensagens') && <Cadastros section={view} autoOpen={autoPatient} focus={focus} onFinish={() => { go('inicio'); setFresh((n) => n + 1); }} />}
         {view === 'produtos' && <Cadastros section={'estoque' satisfies Section} />}
+        </>}
       </main>
 
       {view !== 'sara' && view !== 'whatsapp' && <BottomNav view={view} isManager={isManager} go={go} onQuick={() => setQuick(true)} onMenu={() => setOpen(true)} />}
@@ -289,11 +296,13 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
   const [open, setOpen] = useState<any | null>(null);
   const [concluding, setConcluding] = useState('');
   const { hidden } = useHideValues();
+  const toast = useToast();
 
   async function complete(id: string) {
     if (isClinical) { setOpen(null); setConcluding(id); return; } // owner/gerente/profissional: folha com baixa de estoque confirmada
     setBusyId(id);
     try { await api(`/appointments/${id}/complete`, { method: 'POST', json: {} }); setOpen(null); dash.reload(); att.reload(); sum.reload(); recv.reload(); banks.reload(); setBump((b) => b + 1); }
+    catch (e) { toast(completeErr(e)); }
     finally { setBusyId(''); }
   }
   const d = dash.data, s = sum.data;
@@ -562,10 +571,12 @@ function Agenda({ onStart }: { onStart: (patientId: string, appt: any | null) =>
   const [moving, setMoving] = useState<any | null>(null);
   const [concluding, setConcluding] = useState('');
   const [busy, setBusy] = useState(false);
+  const toast = useToast();
   async function complete(id: string) {
     if (isClinical) { setOpen(null); setConcluding(id); return; } // mesma regra do Início: perfil clínico confirma a baixa de estoque
     setBusy(true);
     try { await api(`/appointments/${id}/complete`, { method: 'POST', json: {} }); setOpen(null); ap.reload(); }
+    catch (e) { toast(completeErr(e)); }
     finally { setBusy(false); }
   }
   const range = `${new Date(`${from}T12:00`).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })} a ${new Date(`${to}T12:00`).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })}`;
