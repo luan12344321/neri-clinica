@@ -11,7 +11,7 @@ const PHONE_ID = '123456789012', SECRET = 'segredo-do-app-meta', TOKEN = `EAAB${
 const KNOWN = '551199990001'; // telefone do "Paciente 1" do seed (+551199990001)
 const MONDAY = '2030-03-18';
 const realFetch = globalThis.fetch;
-let gemini, sent, graphInfo, geminiBodies;
+let gemini, sent, graphInfo, geminiBodies, outId = 0;
 
 // Simula Gemini e Graph API da Meta (nada sai para a internet).
 beforeEach(async () => {
@@ -29,8 +29,8 @@ beforeEach(async () => {
     }
     if (u.includes('graph.facebook.com') && init?.method === 'POST') {
       const b = JSON.parse(init.body);
-      sent.push({ phoneId: u.split('/').at(-2), to: b.to, text: b.text.body, auth: init.headers.authorization });
-      return json({ messages: [{ id: `wamid.OUT${sent.length}` }] });
+      if (b.text.body !== 'Oi, sou a Julia, assistente virtual da clínica.') sent.push({ phoneId: u.split('/').at(-2), to: b.to, text: b.text.body, auth: init.headers.authorization }); // a apresentação automática tem teste próprio
+      return json({ messages: [{ id: `wamid.OUT${++outId}` }] });
     }
     if (u.includes('graph.facebook.com')) return graphInfo ?? json({ display_phone_number: '+55 11 90000-0000', verified_name: 'Clínica Demo' });
     throw new Error(`fetch inesperado: ${u}`);
@@ -131,7 +131,7 @@ test('cliente cadastrado conversa: a Julia consulta a agenda dele, responde com 
   assert.match(sent[0].text, /segunda, 18\/03, às 10h/);
   assert.equal(sent[0].auth, `Bearer ${TOKEN}`, 'usa o token da própria clínica');
   const log = await rows('SELECT direction, body, tokens_in, tokens_out FROM wa_messages ORDER BY id');
-  assert.deepEqual(log.map((l) => l.direction), ['in', 'out']);
+  assert.deepEqual(log.map((l) => l.direction), ['in', 'out', 'out'], 'apresentação + resposta');
   assert.deepEqual([log[1].tokens_in, log[1].tokens_out], [20, 10], 'uso dos dois passos do modelo entra no orçamento');
   const first = geminiBodies[0];
   assert.match(first.systemInstruction.parts[0].text, /assistente virtual/);
@@ -267,7 +267,7 @@ test('áudio e imagem não quebram; resposta longa vira até 3 mensagens curtas'
   await post(payload(KNOWN, '', undefined, PHONE_ID, 'audio'));
   assert.match(JSON.stringify(geminiBodies[0].contents), /não é texto/);
   assert.equal(sent.length, 3);
-  assert.equal((await rows(`SELECT count(*)::int n FROM wa_messages WHERE direction='out'`))[0].n, 3);
+  assert.equal((await rows(`SELECT count(*)::int n FROM wa_messages WHERE direction='out'`))[0].n, 4, 'apresentação + 3 mensagens');
 });
 
 test('o orçamento mensal já existente também conta as conversas do WhatsApp', async () => {

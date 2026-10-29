@@ -10,16 +10,16 @@ after(() => t.close());
 const PHONE_ID = '123456789012', SECRET = 'segredo-do-app-meta', TOKEN = `EAAB${'x'.repeat(40)}`;
 const CLIENT = '551177770001';
 const realFetch = globalThis.fetch;
-let gemini, sent;
+let gemini, sent, outId = 0, keepIntro = false;
 
 beforeEach(async () => {
   await t.reset(); await t.addExtras();
-  gemini = []; sent = [];
+  gemini = []; sent = []; keepIntro = false;
   globalThis.fetch = async (url, init) => {
     const u = String(url);
     const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { 'content-type': 'application/json' } });
     if (u.includes('generativelanguage.googleapis.com')) return json({ candidates: [{ content: { parts: gemini.shift() ?? [{ text: 'ok' }] } }], usageMetadata: { promptTokenCount: 1, totalTokenCount: 2 } });
-    if (u.includes('graph.facebook.com') && init?.method === 'POST') { const b = JSON.parse(init.body); sent.push(b.text.body); return json({ messages: [{ id: `wamid.OUT${sent.length}` }] }); }
+    if (u.includes('graph.facebook.com') && init?.method === 'POST') { const b = JSON.parse(init.body); if (keepIntro || b.text.body !== 'Oi, sou a Julia, assistente virtual da clínica.') sent.push(b.text.body); return json({ messages: [{ id: `wamid.OUT${++outId}` }] }); }
     throw new Error(`fetch inesperado: ${u}`);
   };
   const tk = await owner();
@@ -117,4 +117,20 @@ test('só equipe de atendimento mexe no liga/desliga', async () => {
   const pro = await reception();
   assert.equal((await t.call('PUT', '/integrations/whatsapp/julia', { token: pro, body: { help: true } })).status, 403);
   assert.equal((await t.call('PUT', '/integrations/whatsapp/julia', { token: await owner(), body: { help: 'sim' } })).status, 400);
+});
+
+test('conversa nova começa com a apresentação da Julia; dentro de 12h não repete; depois volta', async () => {
+  keepIntro = true;
+  await setHours([]); // fora do expediente: a Julia atende
+  await inbound('Oi, tudo bem?');
+  assert.equal(sent[0], 'Oi, sou a Julia, assistente virtual da clínica.');
+  assert.equal(sent.length, 2, 'apresentação + resposta');
+
+  await inbound('Qual o horário de vocês?');
+  assert.equal(sent.length, 3, 'só a resposta, sem apresentar de novo');
+  assert.notEqual(sent[2], 'Oi, sou a Julia, assistente virtual da clínica.');
+
+  await t.sql(`UPDATE wa_messages SET created_at = now() - interval '13 hours'`);
+  await inbound('Voltei!');
+  assert.equal(sent[3], 'Oi, sou a Julia, assistente virtual da clínica.', 'conversa retomada depois de 12h');
 });

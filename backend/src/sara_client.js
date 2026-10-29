@@ -17,6 +17,7 @@ const digits = (s) => String(s ?? '').replace(/\D/g, '');
 const first = (name) => String(name ?? '').trim().split(/\s+/)[0] ?? '';
 const norm = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
 
+const INTRO = 'Oi, sou a Julia, assistente virtual da clínica.';
 const SYSTEM = (clinicName, ident) => `Você é a Julia, da recepção da ${clinicName}, conversando pelo WhatsApp com um cliente ou possível cliente.
 Como falar: português do Brasil, simpática e natural, como quem trabalha numa recepção. Mensagens curtas, como no WhatsApp, sem listas longas, sem markdown e sem formalidade exagerada. Responda exatamente ao que a pessoa perguntou, uma coisa de cada vez, com as suas próprias palavras: nada de texto pronto nem de menu numerado. Pode usar o primeiro nome da pessoa. Emoji só de vez em quando.
 Transparência: você é a assistente virtual da clínica. Se perguntarem se você é robô, IA ou pessoa, diga com naturalidade que é a assistente virtual da clínica e siga ajudando.
@@ -130,6 +131,9 @@ export async function answerClient({ clinic, contact, client = defaultClient }) 
     : candidates.length > 1 ? 'Este número está ligado a mais de um cadastro: peça o nome completo e use register_contact para identificar.'
     : 'Este número ainda não tem cadastro: para agendar, peça o nome completo e use register_contact.';
 
+  // Conversa nova (nada enviado a este contato nas últimas 12h): o servidor manda a apresentação antes da resposta.
+  const [recent] = await q(`SELECT 1 FROM wa_messages WHERE clinic_id=$1 AND contact=$2 AND direction='out' AND created_at > now() - interval '12 hours' LIMIT 1`, [clinic.id, contact]);
+  const needIntro = !recent;
   const rows = await q(`SELECT direction, body FROM (SELECT id, direction, body FROM wa_messages WHERE clinic_id=$1 AND contact=$2 ORDER BY id DESC LIMIT 20) t ORDER BY id`, [clinic.id, contact]);
   const contents = [];
   for (const r of rows) {
@@ -141,14 +145,16 @@ export async function answerClient({ clinic, contact, client = defaultClient }) 
   const usage = { input: 0, output: 0 };
   const deadline = Date.now() + Number(process.env.SARA_BUDGET_MS ?? 40_000);
   for (let step = 0; step < 6 && Date.now() < deadline; step++) {
-    const res = await client.generate({ system: SYSTEM(clinic.name, ident), tools: CLIENT_TOOLS.map(declaration), contents },
+    const res = await client.generate({ system: SYSTEM(clinic.name, needIntro ? `${ident} A apresentação ("${INTRO}") é enviada automaticamente antes da sua resposta: não se apresente de novo nem comece com "Oi, sou a Julia".` : ident), tools: CLIENT_TOOLS.map(declaration), contents },
       { timeout: Math.max(1000, deadline - Date.now()) });
     usage.input += res.usage?.input ?? 0; usage.output += res.usage?.output ?? 0;
     contents.push({ role: 'model', parts: res.parts });
     const calls = res.parts.filter((p) => p.functionCall);
     if (!calls.length) {
       const text = res.parts.filter((p) => typeof p.text === 'string' && !p.thought).map((p) => p.text).join('\n').trim();
-      return { texts: splitReply(text), usage, handoff: ctx.handoff, empty: !text };
+      const texts = splitReply(text);
+      if (needIntro && texts.length && !/assistente virtual/i.test(texts[0])) texts.unshift(INTRO);
+      return { texts, usage, handoff: ctx.handoff, empty: !text };
     }
     const results = [];
     for (const { functionCall: fc } of calls) {
