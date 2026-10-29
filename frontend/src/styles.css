@@ -829,6 +829,8 @@ button.ghost.danger { color: var(--neg); border-color: color-mix(in srgb, var(--
 .qgrid span { border-radius: 50%; background: var(--side); }
 .seg button, button.ghost, button.primary { border-radius: 99px; }
 .icon-btn { border-radius: 50%; }
+/* campos herdam 14px dos rótulos (.form label); abaixo de 16px o iPhone dá zoom ao tocar no campo */
+input:not([type='checkbox']):not([type='radio']), select, textarea, .faixa select { font-size: 16px; }
 
 @media (min-width: 1024px) {
   /* lateral flutuante: painel arredondado com margem, como nas referências */

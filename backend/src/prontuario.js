@@ -4,6 +4,7 @@ import { q } from './db.js';
 import { audit, auditCtx } from './audit.js';
 import { ensureSchema } from './schema.js';
 import { blindIndex, decrypt, encrypt, normalizeCpf } from './crypto.js';
+import { normalizePhone } from './fila.js';
 
 // Dados sensíveis (LGPD art. 5º, II): CPF e prontuário. Só perfis clínicos leem; toda leitura/escrita é auditada.
 const CLINICAL = ['owner', 'manager', 'professional'];
@@ -25,7 +26,8 @@ export default async function prontuario(app) {
 
   app.post('/patients', base, async (req, reply) => {
     const b = z.object({ fullName: z.string().min(2), birthDate: z.string().date().optional(),
-      phone: z.string().optional(), email: z.string().email().optional(), cpf: cpfSchema.optional(),
+      // telefone que não vira número de WhatsApp seria salvo e o paciente nunca receberia o retorno
+      phone: z.string().optional().refine((v) => !v || normalizePhone(v), 'Telefone inválido'), email: z.string().email().optional(), cpf: cpfSchema.optional(),
       marketingConsent: z.boolean().default(false) }).parse(req.body);
     const id = randomUUID(); // gerado aqui para poder amarrar o CPF cifrado a este id
     try {
