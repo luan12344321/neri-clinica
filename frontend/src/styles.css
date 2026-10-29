@@ -833,6 +833,13 @@ button.ghost.danger { color: var(--neg); border-color: color-mix(in srgb, var(--
 @media (min-width: 1024px) {
   /* lateral flutuante: painel arredondado com margem, como nas referências */
   .drawer-wrap { padding: 12px 0 12px 12px; width: 276px; background: var(--bg); }
-  .drawer { border-radius: 26px; }
+  .drawer { border-radius: 26px; gap: 2px; }
   .shell { margin-left: 276px; }
+  /* compacta para caber numa tela de 800px de altura sem rolar (mouse não precisa de alvo de 46px) */
+  .drawer-head { padding-bottom: 8px; }
+  .nav-group { margin-top: 2px; gap: 1px; }
+  .nav-group p { margin: 6px 12px 2px; }
+  .nav-group button { min-height: 38px; }
+  /* em tela baixa a lista rola, mas o usuário e o "Sair" ficam sempre visíveis */
+  .drawer-foot { padding-top: 12px; position: sticky; bottom: -12px; padding-bottom: 12px; margin-bottom: -12px; background: var(--side); }
 }
