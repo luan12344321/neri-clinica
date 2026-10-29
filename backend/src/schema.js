@@ -31,6 +31,7 @@ STEPS.push(
 );
 
 STEPS.push(
+  { has: col('wa_contacts', 'read_upto'), sql: 'ALTER TABLE wa_contacts ADD COLUMN IF NOT EXISTS read_upto bigint NOT NULL DEFAULT 0; ALTER TABLE wa_messages ADD COLUMN IF NOT EXISTS staff_user_id uuid' },
   { has: col('users', 'terms_version'), sql: 'ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted_at timestamptz, ADD COLUMN IF NOT EXISTS terms_version text' },
 );
 

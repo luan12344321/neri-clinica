@@ -110,6 +110,55 @@ export default async function whatsapp(app) {
     return { ok: true };
   });
 
+  // ---------- caixa de entrada da equipe (estilo WhatsApp) ----------
+  const phone = z.object({ contact: z.string().regex(/^\d{8,15}$/) });
+  app.get('/integrations/whatsapp/conversations', staff, async (req) => {
+    await ensureSchema();
+    return q(`SELECT c.contact, c.display_name AS name, (c.human_until > now()) AS human, c.handoff_reason AS reason,
+                     l.body AS last_body, l.direction AS last_direction, l.created_at AS last_at,
+                     (SELECT count(*)::int FROM wa_messages m WHERE m.clinic_id=c.clinic_id AND m.contact=c.contact AND m.direction='in' AND m.id > c.read_upto) AS unread,
+                     (SELECT p.full_name FROM patients p WHERE p.clinic_id=c.clinic_id AND regexp_replace(coalesce(p.phone,''),'\\D','','g') = c.contact LIMIT 1) AS patient
+              FROM wa_contacts c
+              JOIN LATERAL (SELECT body, direction, created_at FROM wa_messages m WHERE m.clinic_id=c.clinic_id AND m.contact=c.contact ORDER BY id DESC LIMIT 1) l ON true
+              WHERE c.clinic_id=$1 ORDER BY l.created_at DESC LIMIT 100`, [cid(req)]);
+  });
+
+  app.get('/integrations/whatsapp/conversations/:contact/messages', staff, async (req, reply) => {
+    await ensureSchema();
+    const { contact } = phone.parse(req.params);
+    const [c] = await q('SELECT 1 FROM wa_contacts WHERE clinic_id=$1 AND contact=$2', [cid(req), contact]);
+    if (!c) return reply.code(404).send({ error: 'not found' });
+    const rows = await q(`SELECT id, direction, body, created_at, (staff_user_id IS NOT NULL) AS staff FROM (
+                            SELECT * FROM wa_messages WHERE clinic_id=$1 AND contact=$2 ORDER BY id DESC LIMIT 200) t ORDER BY id`, [cid(req), contact]);
+    await q('UPDATE wa_contacts SET read_upto = GREATEST(read_upto, $3) WHERE clinic_id=$1 AND contact=$2', [cid(req), contact, rows.at(-1)?.id ?? 0]);
+    return rows;
+  });
+
+  // A equipe responde pelo app. A resposta pausa a Julia nesta conversa por 12h (a pessoa assumiu).
+  // Texto livre só vale até 24h depois da última mensagem do cliente (regra da Meta).
+  app.post('/integrations/whatsapp/conversations/:contact/messages', { ...staff, config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req, reply) => {
+    await ensureSchema();
+    const { contact } = phone.parse(req.params);
+    const { text } = z.object({ text: z.string().trim().min(1).max(2000) }).parse(req.body);
+    const clinic = await load(cid(req));
+    if (!clinic.whatsapp_enabled || !clinic.whatsapp_token_enc || !clinic.whatsapp_phone_id) return reply.code(400).send({ error: 'not_configured', detail: 'O WhatsApp da clínica não está ligado.' });
+    const [last] = await q(`SELECT created_at FROM wa_messages WHERE clinic_id=$1 AND contact=$2 AND direction='in' ORDER BY id DESC LIMIT 1`, [clinic.id, contact]);
+    if (!last) return reply.code(404).send({ error: 'not found' });
+    if (Date.now() - new Date(last.created_at).getTime() > 24 * 3600_000) return reply.code(409).send({ error: 'window_closed', detail: 'Passaram mais de 24h desde a última mensagem do cliente. O WhatsApp só permite responder dentro desse prazo.' });
+    let id;
+    try { id = await sendText(clinic, contact, text); }
+    catch (e) {
+      if (!(e instanceof WaError)) throw e;
+      req.log.error({ status: e.status }, 'whatsapp staff send');
+      return reply.code(502).send({ error: 'provider_error', detail: e.detail || `A Meta recusou (HTTP ${e.status}).` });
+    }
+    const [msg] = await q(`INSERT INTO wa_messages (clinic_id, contact, direction, wa_message_id, body, staff_user_id) VALUES ($1,$2,'out',$3,$4,$5) RETURNING id, direction, body, created_at, true AS staff`,
+      [clinic.id, contact, id, text, req.user.userId]);
+    await q(`UPDATE wa_contacts SET human_until = now() + interval '12 hours', handoff_reason = COALESCE(handoff_reason, 'equipe respondeu') WHERE clinic_id=$1 AND contact=$2`, [clinic.id, contact]);
+    await audit(auditCtx(req), 'whatsapp.staff_reply', 'wa_contact', null); // sem o texto: pode ter dado do paciente
+    return reply.code(201).send(msg);
+  });
+
   // ---------- webhook da Meta (público; o corpo precisa chegar CRU para validar a assinatura) ----------
   app.register(async (hook) => {
     hook.addContentTypeParser('application/json', { parseAs: 'buffer' }, (_req, buf, done) => done(null, buf));
