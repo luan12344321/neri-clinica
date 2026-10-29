@@ -14,6 +14,12 @@ const CPF = '529.982.247-25'; // CPF válido de exemplo (dígitos verificadores 
 const newPatient = (token, extra = {}) => t.call('POST', '/patients', { token, body: { fullName: 'Maria Souza', ...extra } });
 const audits = (action) => t.sql('SELECT * FROM audit_log WHERE action=$1 ORDER BY id', [action]);
 
+test('paciente: telefone que não vira número de WhatsApp é recusado', async () => {
+  assert.equal((await newPatient(owner, { phone: '1234' })).status, 400);
+  assert.equal((await newPatient(owner, { phone: '(11) 98765-4321' })).status, 201);
+  assert.equal((await newPatient(owner, { phone: '' })).status, 201);
+});
+
 // ---------- criptografia ----------
 test('crypto: ida e volta, IV aleatório, prefixo de versão', () => {
   const enc = crypto.encrypt('segredo', 'ctx:1');
