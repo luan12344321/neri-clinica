@@ -17,7 +17,7 @@ export default async function cadastros(app) {
   // ---- Procedimentos ----
   app.get('/procedures', read, (req) => q('SELECT * FROM procedures WHERE clinic_id=$1 AND active ORDER BY name', [cid(req)]));
   app.post('/procedures', write, async (req, reply) => {
-    const b = z.object({ name: z.string().min(2), defaultPrice: money, durationMin: z.number().int().positive().default(60) }).parse(req.body);
+    const b = z.object({ name: z.string().min(2).max(120), defaultPrice: money, durationMin: z.number().int().positive().default(60) }).parse(req.body);
     const [r] = await q('INSERT INTO procedures (clinic_id,name,default_price,duration_min) VALUES ($1,$2,$3,$4) RETURNING *',
       [cid(req), b.name, b.defaultPrice, b.durationMin]);
     return reply.code(201).send(r);
@@ -26,7 +26,7 @@ export default async function cadastros(app) {
   // ---- Categorias financeiras ----
   app.get('/categories', write, (req) => q('SELECT * FROM categories WHERE clinic_id=$1 ORDER BY name', [cid(req)]));
   app.post('/categories', write, async (req, reply) => {
-    const b = z.object({ name: z.string().min(2), kind: z.enum(['income', 'expense']),
+    const b = z.object({ name: z.string().min(2).max(120), kind: z.enum(['income', 'expense']),
       dreGroup: z.enum(['receita_bruta', 'deducoes', 'custos_variaveis', 'despesas_operacionais', 'despesas_financeiras', 'impostos_lucro']) }).parse(req.body);
     const [r] = await q('INSERT INTO categories (clinic_id,name,kind,dre_group) VALUES ($1,$2,$3,$4) RETURNING *',
       [cid(req), b.name, b.kind, b.dreGroup]);
@@ -35,7 +35,7 @@ export default async function cadastros(app) {
 
   // ---- Lançamentos (contas a pagar/receber) ----
   app.post('/finance/transactions', write, async (req, reply) => {
-    const b = z.object({ type: z.enum(['income', 'expense']), categoryId: id, description: z.string().min(2),
+    const b = z.object({ type: z.enum(['income', 'expense']), categoryId: id, description: z.string().min(2).max(500),
       amount: z.number().positive(), competenceDate: z.string().date(), dueDate: z.string().date(),
       paid: z.boolean().default(false) }).parse(req.body);
     const [r] = await q(
@@ -52,7 +52,7 @@ export default async function cadastros(app) {
   const noCost = (req, row) => { if (sees$(req) || !row) return row; const { unit_cost, ...rest } = row; return rest; };
   app.get('/products', read, async (req) => (await ensureSchema(), await q('SELECT * FROM products WHERE clinic_id=$1 ORDER BY name', [cid(req)])).map((p) => noCost(req, p)));
   app.post('/products', read, async (req, reply) => {
-    const b = z.object({ name: z.string().min(2), unit: z.string().default('un'), minQuantity: money, targetQuantity: money,
+    const b = z.object({ name: z.string().min(2).max(120), unit: z.string().max(20).default('un'), minQuantity: money, targetQuantity: money,
       unitCost: money.optional(), expiresAt: z.string().date().optional(),
       category: z.string().trim().min(1).max(80).optional(), manufacturer: z.string().trim().min(1).max(120).optional(),
       deviceType: z.enum(['toxin', 'hyaluronic_acid', 'plla', 'pmma', 'calcium_hydroxylapatite', 'other']).default('other'),
@@ -87,8 +87,11 @@ export default async function cadastros(app) {
 
   // ---- Protocolos ----
   app.post('/protocols', write, async (req, reply) => {
-    const b = z.object({ name: z.string().min(2), procedureId: id.optional(), instructions: z.string().min(2),
+    const b = z.object({ name: z.string().min(2).max(120), procedureId: id.optional(), instructions: z.string().min(2).max(5000),
       items: z.array(z.object({ productId: id, quantity: z.number().positive() })).max(50).default([]) }).parse(req.body);
+    if (b.procedureId && !(await q('SELECT 1 FROM procedures WHERE id=$1 AND clinic_id=$2', [b.procedureId, cid(req)])).length) {
+      return reply.code(404).send({ error: 'procedure not found' });
+    }
     const c = await pool.connect();
     try {
       await c.query('BEGIN');
@@ -119,9 +122,10 @@ export default async function cadastros(app) {
     const b = z.object({ procedureId: id.optional(), daysAfter: z.number().int().min(0).max(365), templateId: id }).parse(req.body);
     const [r] = await q(
       `INSERT INTO followup_rules (clinic_id,procedure_id,days_after,template_id)
-       SELECT $1,$2,$3,t.id FROM message_templates t WHERE t.id=$4 AND t.clinic_id=$1 RETURNING *`,
+       SELECT $1,$2,$3,t.id FROM message_templates t WHERE t.id=$4 AND t.clinic_id=$1
+         AND ($2::uuid IS NULL OR EXISTS (SELECT 1 FROM procedures WHERE id=$2 AND clinic_id=$1)) RETURNING *`,
       [cid(req), b.procedureId ?? null, b.daysAfter, b.templateId]);
-    return r ? reply.code(201).send(r) : reply.code(404).send({ error: 'template not found' });
+    return r ? reply.code(201).send(r) : reply.code(404).send({ error: 'template or procedure not found' });
   });
 
   // ---- Alertas ----

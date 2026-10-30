@@ -1,0 +1,10 @@
+{
+  "name": "neri-clinica",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n api,web -c green,cyan \"npm --prefix backend run dev:local\" \"npm --prefix frontend run dev\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

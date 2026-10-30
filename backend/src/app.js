@@ -16,8 +16,13 @@ const isTest = process.env.NODE_ENV === 'test';
 const DUMMY_HASH = bcrypt.hashSync('dummy-password-for-timing', 10);
 // O app é público em /api/* (Vercel, Netlify, proxy do vite), mas as rotas são registradas na raiz: removemos o prefixo aqui.
 const app = Fastify({
-  logger: isTest ? false : { redact: ['req.headers.authorization'] },
-  trustProxy: Boolean(process.env.VERCEL), // atrás da Vercel o IP do cliente vem em x-forwarded-for (auditoria e limite de login)
+  // URL logada sem a query: ela pode trazer nome de paciente (/patients?search=) ou o code/state do OAuth
+  logger: isTest ? false : { redact: ['req.headers.authorization'],
+    serializers: { req: (r) => ({ method: r.method, url: String(r.url).split('?')[0], remoteAddress: r.ip }) } },
+  // Atrás da Vercel o IP do cliente vem em x-forwarded-for. Confia só no último salto (o da Vercel):
+  // com `true` valeria o primeiro valor da lista, que o próprio cliente pode forjar e assim fugir do limite de login.
+  // (função e não número: o `trustProxy: 1` do fastify 5.12 não lê o x-forwarded-for)
+  trustProxy: process.env.VERCEL ? (_addr, hop) => hop === 0 : false,
   rewriteUrl: (req) => req.url.replace(/^\/api(?=\/|\?|$)/, '') || '/',
 });
 // Em produção o app e a API são da mesma origem (/api), então CORS fica desligado, salvo lista explícita.
@@ -120,15 +125,16 @@ app.post('/me/password', { ...guard, config: { rateLimit: { max: 5, timeWindow: 
 // ---------- Dashboard / agenda ----------
 app.get('/dashboard', guard, async (req) => {
   const d = await getDashboard(clinic(req));
-  return MANAGERS.includes(req.user.role) ? d : { ...d, revenueByMonth: [], todayRevenue: null };
+  return MANAGERS.includes(req.user.role) ? d
+    : { ...d, revenueByMonth: [], todayRevenue: null, topProcedures: d.topProcedures.map(({ revenue, ...p }) => p) };
 });
 
 app.get('/appointments', guard, async (req) => {
   const { from, to } = z.object({ from: z.string().date(), to: z.string().date() }).parse(req.query);
   // dias no fuso da clínica (comparar com a data pura usa o fuso do banco, UTC: o fim da noite caía no dia seguinte)
   return q(`SELECT a.*, p.full_name AS patient, pr.name AS procedure
-            FROM appointments a JOIN patients p ON p.id=a.patient_id
-            LEFT JOIN procedures pr ON pr.id=a.procedure_id
+            FROM appointments a JOIN patients p ON p.id=a.patient_id AND p.clinic_id=a.clinic_id
+            LEFT JOIN procedures pr ON pr.id=a.procedure_id AND pr.clinic_id=a.clinic_id
             JOIN clinics c ON c.id=a.clinic_id
             WHERE a.clinic_id=$1 AND (a.starts_at AT TIME ZONE c.timezone)::date BETWEEN $2::date AND $3::date
             ORDER BY a.starts_at`, [clinic(req), from, to]);
@@ -137,21 +143,29 @@ app.get('/appointments', guard, async (req) => {
 const apptBody = z.object({
   patientId: z.guid(), procedureId: z.guid().optional(),
   professionalId: z.guid().optional(),
-  startsAt: z.string().datetime(), endsAt: z.string().datetime(), price: z.number().positive().optional(),
-});
+  startsAt: z.string().datetime(), endsAt: z.string().datetime(), price: z.number().positive().max(1_000_000).optional(),
+}).refine((v) => Date.parse(v.endsAt) > Date.parse(v.startsAt), 'endsAt deve ser depois de startsAt')
+  .refine((v) => Date.parse(v.endsAt) - Date.parse(v.startsAt) <= 24 * 3600e3, 'atendimento de no máximo 24 horas');
 app.post('/appointments', guard, async (req, reply) => {
   const b = apptBody.parse(req.body);
   const [row] = await q(
     `INSERT INTO appointments (clinic_id, patient_id, procedure_id, professional_id, starts_at, ends_at, price)
      SELECT $1,$2,$3,$4,$5,$6, COALESCE($7, (SELECT default_price FROM procedures WHERE id=$3 AND clinic_id=$1))
      WHERE EXISTS (SELECT 1 FROM patients WHERE id=$2 AND clinic_id=$1)
+       -- procedimento e profissional só da própria clínica (as FKs não conferem a clínica)
+       AND ($3::uuid IS NULL OR EXISTS (SELECT 1 FROM procedures WHERE id=$3 AND clinic_id=$1))
+       AND ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM users WHERE id=$4 AND clinic_id=$1))
        AND NOT EXISTS (SELECT 1 FROM appointments x WHERE x.clinic_id=$1 AND x.status NOT IN ('canceled','no_show')
                        AND x.starts_at < $6 AND x.ends_at > $5 AND ($4::uuid IS NULL OR x.professional_id=$4))
      RETURNING *`,
     [clinic(req), b.patientId, b.procedureId ?? null, b.professionalId ?? null, b.startsAt, b.endsAt, b.price ?? null]);
   if (!row) {
-    const [p] = await q('SELECT 1 FROM patients WHERE id=$1 AND clinic_id=$2', [b.patientId, clinic(req)]);
-    return reply.code(p ? 409 : 404).send({ error: p ? 'slot_taken' : 'patient not found' });
+    const [p] = await q(`SELECT EXISTS (SELECT 1 FROM patients WHERE id=$1 AND clinic_id=$2) AS patient,
+      ($3::uuid IS NULL OR EXISTS (SELECT 1 FROM procedures WHERE id=$3 AND clinic_id=$2)) AS procedure,
+      ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM users WHERE id=$4 AND clinic_id=$2)) AS professional`,
+      [b.patientId, clinic(req), b.procedureId ?? null, b.professionalId ?? null]);
+    const missing = ['patient', 'procedure', 'professional'].find((k) => !p[k]);
+    return reply.code(missing ? 404 : 409).send({ error: missing ? `${missing} not found` : 'slot_taken' });
   }
   pushAppointment(row.id).catch((e) => req.log.error(e)); // se falhar, o cron de sync reenvia
   return reply.code(201).send(row);
@@ -162,7 +176,9 @@ app.patch('/appointments/:id', guard, async (req, reply) => {
   const { id } = z.object({ id: z.guid() }).parse(req.params);
   const b = z.object({ startsAt: z.string().datetime().optional(), endsAt: z.string().datetime().optional(),
     status: z.enum(['confirmed', 'canceled', 'no_show']).optional() })
-    .refine((v) => (!v.startsAt) === (!v.endsAt), 'startsAt e endsAt andam juntos').parse(req.body);
+    .refine((v) => (!v.startsAt) === (!v.endsAt), 'startsAt e endsAt andam juntos')
+    .refine((v) => !v.startsAt || Date.parse(v.endsAt) > Date.parse(v.startsAt), 'endsAt deve ser depois de startsAt')
+    .refine((v) => !v.startsAt || Date.parse(v.endsAt) - Date.parse(v.startsAt) <= 24 * 3600e3, 'atendimento de no máximo 24 horas').parse(req.body);
   const [row] = await q(
     `UPDATE appointments SET starts_at=COALESCE($3,starts_at), ends_at=COALESCE($4,ends_at),
        status=COALESCE($5,status), updated_at=now()
@@ -207,7 +223,7 @@ app.post('/appointments/:id/complete', guard, async (req, reply) => {
 
 // ---------- Pacientes ----------
 app.get('/patients', guard, (req) => {
-  const { search = '' } = req.query;
+  const { search } = z.object({ search: z.string().max(80).default('') }).parse(req.query ?? {});
   return q(`SELECT id, full_name, birth_date, phone FROM patients
             WHERE clinic_id=$1 AND full_name ILIKE $2 ORDER BY full_name LIMIT 50`, [clinic(req), `%${search}%`]);
 });
@@ -239,7 +255,9 @@ app.post('/finance/transactions/:id/pay', manager, async (req, reply) => {
   if (bankAccountId && !acct) return reply.code(404).send({ error: 'bank account not found' });
   const [row] = await q(`UPDATE transactions SET status='paid', paid_at=now(), bank_account_id=$3
     WHERE id=$1 AND clinic_id=$2 AND status='pending' RETURNING *`, [id, clinic(req), acct?.id ?? null]);
-  return row ?? reply.code(404).send({ error: 'not found' });
+  if (!row) return reply.code(404).send({ error: 'not found' });
+  await audit({ clinicId: clinic(req), userId: req.user.userId, ip: req.ip }, 'finance.mark_paid', 'transaction', id);
+  return row;
 });
 
 // ---------- Estoque ----------

@@ -19,13 +19,13 @@ const cpfSchema = z.string().transform((v, ctx) => {
 export default async function prontuario(app) {
   const base = { onRequest: [app.auth] };
   const clinical = { onRequest: [app.auth, async (req, reply) => {
-    if (!CLINICAL.includes(req.user.role)) reply.code(403).send({ error: 'forbidden' });
+    if (!CLINICAL.includes(req.user.role)) return reply.code(403).send({ error: 'forbidden' });
   }] };
   const cid = (req) => req.user.clinicId;
   const dupCpf = (e) => e.code === '23505'; // violação de unicidade (clinic_id, cpf_hash)
 
   app.post('/patients', base, async (req, reply) => {
-    const b = z.object({ fullName: z.string().min(2), birthDate: z.string().date().optional(),
+    const b = z.object({ fullName: z.string().min(2).max(120), birthDate: z.string().date().optional(),
       // telefone que não vira número de WhatsApp seria salvo e o paciente nunca receberia o retorno
       phone: z.string().optional().refine((v) => !v || normalizePhone(v), 'Telefone inválido'), email: z.string().email().optional(), cpf: cpfSchema.optional(),
       marketingConsent: z.boolean().default(false) }).parse(req.body);
@@ -124,7 +124,7 @@ export default async function prontuario(app) {
 
   // Quem acessou o quê: apenas o dono da clínica.
   app.get('/audit', { onRequest: [app.auth, async (req, reply) => {
-    if (req.user.role !== 'owner') reply.code(403).send({ error: 'forbidden' });
+    if (req.user.role !== 'owner') return reply.code(403).send({ error: 'forbidden' });
   }] }, (req) => q(
     `SELECT a.id, a.created_at, a.action, a.entity, a.entity_id, a.ip, u.name AS user_name
      FROM audit_log a LEFT JOIN users u ON u.id=a.user_id

@@ -10,9 +10,9 @@ export const ageOf = (birth?: string | null) => {
   if (n.getMonth() < b.getMonth() || (n.getMonth() === b.getMonth() && n.getDate() < b.getDate())) a--;
   return a;
 };
-const pad = (n: number) => String(n).padStart(2, '0');
-const clock = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-const mins = (d: Date) => d.getHours() * 60 + d.getMinutes();
+// horário no fuso da clínica (igual à Agenda), não no do aparelho
+export const clock = (d: Date) => d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+const mins = (d: Date) => { const [h, m] = clock(d).split(':').map(Number); return h! * 60 + m!; };
 const HOUR = 56; // altura de uma hora, em px
 
 // Atrasado: ainda agendado/confirmado e o horário de término já passou. Única regra para Início e Agenda.

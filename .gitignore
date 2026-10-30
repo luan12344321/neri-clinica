@@ -12,3 +12,9 @@ netlify/dist-functions/
 Logo/
 frontend/Referencias/
 frontend/Video/
+
+# Relatorios de auditoria de seguranca (locais)
+.security-audit/
+
+# Banco local do dev:local (PGlite): nunca vai para o Git
+backend/.pglite-data/

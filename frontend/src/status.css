@@ -1,0 +1,34 @@
+/* ---------- Páginas de erro com a Julia ---------- */
+.status-page { min-height: 70dvh; display: grid; place-content: center; justify-items: center; gap: 12px; text-align: center; padding: 32px 16px; }
+.status-page .mascote { margin-bottom: 8px; }
+.status-page h2 { font-size: clamp(20px, 5vw, 26px); letter-spacing: -0.015em; text-wrap: balance; max-width: 22ch; margin: 0; }
+.status-page h2:focus { outline: none; }
+.status-page > p { margin: 0; color: var(--muted); max-width: 42ch; text-wrap: pretty; }
+.status-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
+.status-actions button { min-height: 44px; }
+.status-code { margin-top: 12px !important; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: no-preference) {
+  .status-page { animation: status-in .4s var(--ease) both; }
+  @keyframes status-in { from { opacity: 0; transform: translateY(8px); } }
+}
+
+/* ---------- Avisos do sistema (sem internet, versão nova) ---------- */
+.sys-banners { position: fixed; z-index: 60; left: 0; right: 0; top: calc(var(--top-h) + env(safe-area-inset-top) + 8px);
+  display: grid; justify-items: center; gap: 8px; padding: 0 16px; pointer-events: none; }
+.sys-banner { pointer-events: auto; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; max-width: 560px;
+  background: var(--glass-dark); color: var(--hero-ink); padding: 4px 4px 4px 16px; border-radius: var(--radius-md);
+  -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); box-shadow: var(--shadow-soft); font-size: 14px; font-weight: 550; }
+.sys-banner > span { flex: 1 1 200px; padding: 6px 0; }
+.sys-banner.ok { padding-right: 16px; }
+.sys-btn { min-height: 44px; padding: 0 14px; border: 0; border-radius: var(--radius-pill); background: var(--card); color: var(--accent); font-weight: 650; }
+.sys-btn.quiet { background: transparent; color: var(--hero-ink); }
+.sys-btn:focus-visible { outline-color: var(--hero-ink); }
+@media (prefers-reduced-motion: no-preference) {
+  .sys-banner { animation: status-in .3s var(--ease) both; }
+}
+
+/* ---------- Sessão expirada (tela de entrada) ---------- */
+.expired-note { display: flex; align-items: center; gap: 10px; text-align: start; background: var(--accent-soft); color: var(--ink);
+  border-radius: var(--radius-sm); padding: 10px 12px; margin: 4px 0 8px; }
+.expired-note p { margin: 0; font-size: 14px; }
+.expired-note .mascote { flex: none; }

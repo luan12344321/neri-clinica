@@ -1,3 +1,5 @@
+import { markExpired } from './StatusPage';
+
 const KEY = 'clinica.token';
 export const getToken = () => { try { return localStorage.getItem(KEY); } catch { return null; } };
 export const setToken = (t: string | null) => {
@@ -12,7 +14,7 @@ export async function api<T = any>(path: string, init: RequestInit & { json?: un
     headers: { 'Content-Type': 'application/json', ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}) },
     body: init.json !== undefined ? JSON.stringify(init.json) : init.body,
   });
-  if (res.status === 401 && path !== '/auth/login') { setToken(null); location.reload(); }
+  if (res.status === 401 && path !== '/auth/login') { markExpired(); setToken(null); location.reload(); } // a tela de entrada explica que a sessão expirou
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, data.error ?? 'Erro inesperado', data.detail);
   return data as T;

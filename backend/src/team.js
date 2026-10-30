@@ -41,7 +41,10 @@ export default async function team(app) {
     const b = z.object({ name: z.string().trim().min(2).max(120).optional(), role: z.enum(ROLES).optional(), password: password.optional() })
       .refine((v) => Object.keys(v).length > 0, 'nada para alterar').parse(req.body);
     const hash = b.password ? await bcrypt.hash(b.password, 10) : null;
-    const [u] = await q(`UPDATE users SET name=COALESCE($3,name), role=COALESCE($4,role), password_hash=COALESCE($5,password_hash)
+    // Reativar alguém removido (nova senha) não religa a Agenda Google antiga dele: precisa conectar de novo.
+    const [u] = await q(`UPDATE users SET name=COALESCE($3,name), role=COALESCE($4,role), password_hash=COALESCE($5,password_hash),
+                           google_refresh_token_enc=CASE WHEN password_hash='!' THEN NULL ELSE google_refresh_token_enc END,
+                           google_sync_token=CASE WHEN password_hash='!' THEN NULL ELSE google_sync_token END
                          WHERE id=$1 AND clinic_id=$2 AND role<>'owner' RETURNING ${COLS}`,
       [id, cid(req), b.name ?? null, b.role ?? null, hash]);
     if (!u) return reply.code(404).send({ error: 'not found' });
@@ -52,7 +55,10 @@ export default async function team(app) {
   // Remove o acesso (não apaga o usuário). Para reativar, o dono redefine a senha dele.
   app.delete('/team/:id', owner, async (req, reply) => {
     const { id } = z.object({ id: z.guid() }).parse(req.params);
-    const [u] = await q(`UPDATE users SET password_hash=$3 WHERE id=$1 AND clinic_id=$2 AND role<>'owner' RETURNING id`, [id, cid(req), REVOKED]);
+    // Também desliga a Agenda Google dele: senão os agendamentos (nome do paciente) continuariam indo para a agenda pessoal
+    // de quem saiu, e o que ele mexesse lá voltaria para a agenda da clínica.
+    const [u] = await q(`UPDATE users SET password_hash=$3, google_refresh_token_enc=NULL, google_sync_token=NULL
+                         WHERE id=$1 AND clinic_id=$2 AND role<>'owner' RETURNING id`, [id, cid(req), REVOKED]);
     if (!u) return reply.code(404).send({ error: 'not found' });
     await audit(auditCtx(req), 'team.revoke', 'user', id);
     return reply.code(204).send();

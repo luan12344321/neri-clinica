@@ -189,21 +189,25 @@ export default async function whatsapp(app) {
       let payload;
       try { payload = JSON.parse(req.body.toString('utf8')); } catch { return reply.code(400).send({ error: 'bad request' }); }
       if (payload?.object !== 'whatsapp_business_account') return { ok: true };
+      // Antes da assinatura nada é confiável: cada número diferente custa uma consulta. Um aviso real traz um número só
+      // (a Meta agrupa por conta); muitos números distintos num mesmo corpo é abuso.
+      const changes = (Array.isArray(payload.entry) ? payload.entry : []).flatMap((e) => (Array.isArray(e?.changes) ? e.changes : []));
+      if (new Set(changes.map((c) => c?.value?.metadata?.phone_number_id).filter(Boolean)).size > 5) return reply.code(400).send({ error: 'bad request' });
       await ensureSchema();
-      for (const entry of payload.entry ?? []) {
-        for (const change of entry.changes ?? []) {
-          const v = change.value;
-          const phoneId = v?.metadata?.phone_number_id;
-          if (!phoneId || !v.messages?.length) continue; // status de entrega e afins: nada a responder
-          const [clinic] = await q(`SELECT id, name, whatsapp_enabled, whatsapp_phone_id, whatsapp_token_enc, whatsapp_secret_enc FROM clinics WHERE whatsapp_phone_id=$1`, [String(phoneId)]);
-          if (!clinic?.whatsapp_enabled || !clinic.whatsapp_secret_enc) continue; // desligado ou desconhecido: ignora (200 evita reenvio)
-          if (!validSignature(req.body, req.headers['x-hub-signature-256'], decrypt(clinic.whatsapp_secret_enc, secretAad(clinic.id)))) {
-            return reply.code(401).send({ error: 'invalid signature' });
-          }
-          for (const m of v.messages) {
-            const name = v.contacts?.find((c) => c.wa_id === m.from)?.profile?.name;
-            await inbound(req, clinic, m, name).catch((e) => req.log.error({ err: e?.name, status: e?.status }, 'whatsapp inbound'));
-          }
+      const clinics = new Map();
+      for (const change of changes) {
+        const v = change?.value;
+        const phoneId = v?.metadata?.phone_number_id;
+        if (!phoneId || !v.messages?.length) continue; // status de entrega e afins: nada a responder
+        if (!clinics.has(String(phoneId))) clinics.set(String(phoneId), (await q(`SELECT id, name, whatsapp_enabled, whatsapp_phone_id, whatsapp_token_enc, whatsapp_secret_enc FROM clinics WHERE whatsapp_phone_id=$1`, [String(phoneId)]))[0]);
+        const clinic = clinics.get(String(phoneId));
+        if (!clinic?.whatsapp_enabled || !clinic.whatsapp_secret_enc) continue; // desligado ou desconhecido: ignora (200 evita reenvio)
+        if (!validSignature(req.body, req.headers['x-hub-signature-256'], decrypt(clinic.whatsapp_secret_enc, secretAad(clinic.id)))) {
+          return reply.code(401).send({ error: 'invalid signature' });
+        }
+        for (const m of v.messages) {
+          const name = v.contacts?.find((c) => c.wa_id === m.from)?.profile?.name;
+          await inbound(req, clinic, m, name).catch((e) => req.log.error({ err: e?.name, status: e?.status }, 'whatsapp inbound'));
         }
       }
       return { ok: true }; // sempre 200 depois de processar: a Meta reenvia se demorar ou falhar

@@ -4,8 +4,9 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Bar, BarChart, CartesianGrid,
 import { ApiError, api, brl, monthLabel, thisMonth } from './api';
 import { AddForm, errText, type Field } from './Cadastros';
 import { useLoad } from './hooks';
+import PainelCiclo from './PainelCiclo';
 import { Icon, type IconName } from './Icon';
-import { Empty, EyeToggle, ListSkeleton, PageHead, Segmented, Sheet, mask, useHideValues, useToast } from './ui';
+import { ConfirmButton, Empty, EyeToggle, ListSkeleton, PageHead, Segmented, Sheet, mask, useHideValues, useToast } from './ui';
 
 export type FinTab = 'resumo' | 'contas' | 'bancos' | 'dre';
 export type Bank = {
@@ -70,6 +71,7 @@ export function Finance({ initialTab = 'resumo', onTab }: { initialTab?: FinTab;
         <div className="toolbar"><label>Mês<input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} /></label></div>
       )}
       {tab === 'resumo' && <Summary sum={sum} flow={flow} banks={banks.data} recv={recv.data} pay={pay.data} bump={bump} goTab={setTab} />}
+      {tab === 'resumo' && <PainelCiclo />}
       {tab === 'contas' && <Accounts recv={recv.data} pay={pay.data} banks={banks.data ?? []} onChanged={refresh} goBanks={() => setTab('bancos')} error={recv.error || pay.error} />}
       {tab === 'bancos' && <Banks banks={banks} onChanged={refresh} />}
       {tab === 'dre' && <Dre dre={dre} />}
@@ -400,8 +402,12 @@ function BankSheet({ bank, onClose, onDone }: { bank?: Bank; onClose: () => void
         }} />
       {bank && (
         <div className="danger-zone">
-          {bank.pixKeyMasked && <button className="ghost" onClick={() => act({ pixKey: '' }, 'Chave Pix removida')}>Remover chave Pix</button>}
-          <button className="ghost danger" onClick={() => act({ active: !bank.active }, bank.active ? 'Conta arquivada' : 'Conta reativada')}>{bank.active ? 'Arquivar conta' : 'Reativar conta'}</button>
+          {bank.pixKeyMasked && <ConfirmButton label="Remover chave Pix" confirm="Confirmar remoção" onConfirm={() => act({ pixKey: '' }, 'Chave Pix removida')}
+            text={`Sem chave, esta conta não gera cobranças por Pix até você cadastrar outra (atual: ${bank.pixKeyMasked}).`} />}
+          {bank.active
+            ? <ConfirmButton label="Arquivar conta" confirm="Confirmar arquivamento" onConfirm={() => act({ active: false }, 'Conta arquivada')}
+                text="A conta deixa de receber cobranças e vai para o fim da lista. O histórico de lançamentos é mantido e você pode reativá-la depois." />
+            : <button className="ghost" onClick={() => act({ active: true }, 'Conta reativada')}>Reativar conta</button>}
           {err && <p role="alert" className="err">{err}</p>}
         </div>
       )}

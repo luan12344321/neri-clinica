@@ -93,6 +93,23 @@ export default async function payments(app) {
       .passthrough().parse(req.body);
     if (event !== 'PAYMENT_RECEIVED' || !payment) return { ok: true, ignored: true };
     await ensureSchema();
+    const [pend] = await q(`SELECT id, amount::float AS amount FROM transactions WHERE external_id=$1 AND status='pending'`, [ref(payment.id)]);
+    if (!pend) return { ok: true }; // cobrança desconhecida ou já baixada
+    // O corpo do aviso não é prova de pagamento (o segredo do webhook é um só e pode vazar): confere no próprio Asaas
+    // que a cobrança foi recebida, que é desta conta a receber e que o valor cobre o lançamento.
+    let real;
+    try { real = await asaas.getPayment(payment.id); }
+    catch (e) {
+      req.log.error({ err: e?.name, status: e?.status }, 'asaas: falha ao confirmar pagamento');
+      // 4xx (chave errada, cobrança de outro ambiente) não melhora com reenvio: 200 evita que 15 falhas pausem a fila do Asaas.
+      // A conta fica pendente e pode ser baixada à mão. Falha temporária (5xx, rede) pede reenvio.
+      if (e?.status >= 400 && e.status < 500) return { ok: true, ignored: true };
+      return reply.code(502).send({ error: 'provider_error' });
+    }
+    if (!['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'].includes(real.status) || real.externalReference !== pend.id || !(Number(real.value) >= pend.amount)) {
+      req.log.warn({ transaction: pend.id, status: real.status }, 'asaas: aviso não confere com a cobrança');
+      return { ok: true, ignored: true };
+    }
     const c = await pool.connect();
     try {
       await c.query('BEGIN');
@@ -101,7 +118,7 @@ export default async function payments(app) {
            bank_account_id=(SELECT id FROM bank_accounts WHERE clinic_id=transactions.clinic_id AND provider='asaas' ORDER BY created_at LIMIT 1)
          WHERE external_id=$1 AND status='pending' RETURNING id, clinic_id, bank_account_id`, [ref(payment.id)]);
       if (t) {
-        const fee = payment.value != null && payment.netValue != null ? round2(payment.value - payment.netValue) : 0;
+        const fee = real.value != null && real.netValue != null ? round2(real.value - real.netValue) : 0;
         if (fee > 0) {
           let { rows: [cat] } = await c.query(`SELECT id FROM categories WHERE clinic_id=$1 AND kind='expense' AND dre_group='despesas_financeiras' ORDER BY name LIMIT 1`, [t.clinic_id]);
           if (!cat) ({ rows: [cat] } = await c.query(`INSERT INTO categories (clinic_id, name, kind, dre_group) VALUES ($1,'Tarifas de pagamento','expense','despesas_financeiras') RETURNING id`, [t.clinic_id]));
@@ -110,6 +127,7 @@ export default async function payments(app) {
              SELECT $1,'expense',$2,'Tarifa Asaas',$3,d,d,'paid',now(),$4,$5 FROM (SELECT (now() AT TIME ZONE timezone)::date AS d FROM clinics WHERE id=$1) x
              ON CONFLICT DO NOTHING`, [t.clinic_id, cat.id, fee, t.bank_account_id, `asaas-fee:${payment.id}`]);
         }
+        await c.query(`INSERT INTO audit_log (clinic_id, action, entity, entity_id, ip) VALUES ($1,'finance.paid_by_asaas','transaction',$2,$3)`, [t.clinic_id, t.id, req.ip ?? null]); // na mesma conexão da transação
         req.log.info({ transaction: t.id }, 'recebimento Pix confirmado pelo Asaas');
       }
       await c.query('COMMIT');

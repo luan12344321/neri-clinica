@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { q } from './db.js';
 import { audit } from './audit.js';
+import { decrypt, encrypt } from './crypto.js';
 import { ensureSchema } from './schema.js';
 import { DEFAULT_HOURS } from './hours.js';
 import { pushAppointment } from './google.js';
@@ -286,18 +287,27 @@ const replayable = (r) => {
   return { role: 'model', parts: [{ text: textOf(parts) }] };
 };
 
+// O histórico pode citar prontuário (o modelo resume o que leu): fica cifrado, preso à clínica e à conversa.
+// Linhas antigas, gravadas em claro antes desta mudança, continuam legíveis.
+const historyAad = (clinicId, conversationId) => `sara_messages.content:${clinicId}:${conversationId}`;
+const openHistory = (content, aad) => {
+  if (typeof content !== 'string' || !content.startsWith('v1:')) return content;
+  try { return JSON.parse(decrypt(content, aad)); } catch { return content; }
+};
+
 export async function askSara({ clinicId, userId, role, ip, message, conversationId = randomUUID(), client = defaultClient }) {
   await checkBudget(clinicId);
+  const aad = historyAad(clinicId, conversationId);
   const rows = await q(
     `SELECT role, content FROM (SELECT id, role, content FROM sara_messages
        WHERE conversation_id=$1 AND clinic_id=$2 AND user_id=$3 ORDER BY id DESC LIMIT 20) t ORDER BY id`, [conversationId, clinicId, userId]);
-  const contents = rows.map(replayable).filter(Boolean);
+  const contents = rows.map((r) => replayable({ ...r, content: openHistory(r.content, aad) })).filter(Boolean);
   while (contents[0]?.role === 'model') contents.shift();
   contents.push({ role: 'user', parts: [{ text: message }] });
   const save = (r, content, usage) => q(
     `INSERT INTO sara_messages (clinic_id,user_id,conversation_id,role,content,tokens_in,tokens_out)
      VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-    [clinicId, userId, conversationId, r, JSON.stringify(content), usage?.input ?? null, usage?.output ?? null]);
+    [clinicId, userId, conversationId, r, JSON.stringify(encrypt(JSON.stringify(content), aad)), usage?.input ?? null, usage?.output ?? null]);
   await save('user', message);
 
   const tools = toolsFor(role);
@@ -329,7 +339,10 @@ export async function askSara({ clinicId, userId, role, ip, message, conversatio
       results.push({ functionResponse: { name: fc.name, response } });
     }
     contents.push({ role: 'user', parts: results });
-    await save('user', results);
+    // No histórico fica só qual ferramenta rodou e se deu certo: o resultado pode ter prontuário decifrado e CPF,
+    // que não podem ficar em claro nesta tabela (e o histórico de ferramentas nunca é reenviado ao modelo).
+    await save('user', results.map(({ functionResponse: { name, response } }) =>
+      ({ functionResponse: { name, response: response.error ? { error: response.error } : { ok: true } } })));
   }
   return { conversationId, reply: 'Não consegui concluir a consulta a tempo. Tente uma pergunta mais específica.' };
 }
