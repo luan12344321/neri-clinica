@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt', // o app avisa da versão nova (StatusPage.tsx) em vez de recarregar no meio de um cadastro
       includeAssets: ['apple-touch-icon.png', 'neri-logo.png', 'neri-n.png'],
       manifest: {
         id: '/',

@@ -1,23 +1,27 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
 import { useLoad } from './hooks';
-import { Area, AreaChart, Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from 'recharts';
-import { ApiError, api, brl, getToken, lastMonths, monthLabel, setToken, thisMonth } from './api';
+import { ApiError, api, brl, getToken, setToken } from './api';
 import { Icon, type IconName } from './Icon';
 import { AppointmentSheet, Cadastros, NewAppointment, RescheduleSheet, errText, type Focus, type Section } from './Cadastros';
-import { ApptSheet, DayStrip, DayTimeline, ageOf, isLate } from './Timeline';
+import { ApptSheet, DayTimeline, ageOf, clock, isLate } from './Timeline';
 import { ConcluirAtendimento } from './Atendimento';
 import { AtencaoLista, RetornosDoDia, type AttItem } from './RetornosDoDia';
 import { useHours } from './hours';
 import { LegalLinks, LegalPage, TermsGate, legalFromHash } from './Legal';
 import { Avatar, Empty, ErrorBoundary, EyeToggle, ListSkeleton, RoleProvider, ToastProvider, mask, useHideValues, useRole, useToast } from './ui';
-import { Settings, type Me } from './Settings';
+import type { Me } from './Settings';
 import { PresenceButton } from './Presence';
-import { Finance, RecentTransactions, type Bank, type FinTab } from './Finance';
-import PainelCiclo from './PainelCiclo';
+import type { FinTab } from './Finance';
+import { SessionExpiredNote, StatusPage } from './StatusPage';
 import Mascote, { type Mood } from './Mascote';
 import JuliaGuide, { type Nudge } from './JuliaGuide';
 import WhatsApp, { BASE as WA_BASE, type Conversation } from './WhatsApp';
 import { BottomNav, InstallPill, QuickSheet, Splash, type QuickAction } from './Chrome';
+
+// Telas pesadas (gráficos do Financeiro, Configurações, Agenda completa) baixam só quando abertas; o service worker guarda para as próximas visitas.
+const AgendaView = lazy(() => import('./AgendaView').then((m) => ({ default: m.AgendaView })));
+const Settings = lazy(() => import('./Settings').then((m) => ({ default: m.Settings })));
+const Finance = lazy(() => import('./Finance').then((m) => ({ default: m.Finance })));
 
 type View = 'inicio' | 'agenda' | 'financeiro' | 'estoque' | 'sara' | 'pacientes' | 'procedimentos' | 'produtos' | 'mensagens' | 'whatsapp' | 'config';
 
@@ -38,19 +42,19 @@ const NAV: { group: string; items: { id: View; label: string; icon: IconName; mg
   ] },
   { group: 'Comunicação', items: [{ id: 'mensagens', label: 'Mensagens', icon: 'mail', mgr: true }] },
   { group: 'Conta', items: [{ id: 'config', label: 'Configurações', icon: 'gear' }] },
-  { group: 'Atendimento', items: [{ id: 'whatsapp', label: 'WhatsApp', icon: 'chat', front: true }] },
+  { group: 'Atendimento', items: [{ id: 'whatsapp', label: 'WhatsApp', icon: 'whatsapp', front: true }] },
 ];
 const NAV_ITEMS = NAV.flatMap((g) => g.items);
 const TITLES = Object.fromEntries(NAV.flatMap((g) => g.items.map((i) => [i.id, i.label]))) as Record<View, string>;
 const TITLE_OVERRIDE: Partial<Record<View, string>> = { inicio: 'Início', sara: 'Julia' };
 // A tela aberta fica no endereço (#/agenda...): o "voltar" do navegador/celular troca de tela e recarregar não perde o lugar.
 const viewFromHash = (h: string) => { const id = h.replace(/^#\//, ''); return NAV_ITEMS.some((i) => i.id === id) ? (id as View) : null; };
+const isLost = (h: string) => !!h.replace(/^#\/?/, '') && !viewFromHash(h);
 
 const completeErr = (e: unknown) => e instanceof ApiError && e.status === 409
   ? 'Este atendimento não pode mais ser concluído (já foi concluído, cancelado ou marcado como falta).' : errText(e);
 const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'; };
 const initials = (name = '') => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('') || '·';
-const pct = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
 
 export default function App() {
   const [authed, setAuthed] = useState(!!getToken());
@@ -65,6 +69,8 @@ export default function App() {
 function Shell({ onLogout }: { onLogout: () => void }) {
   const me = useLoad<Me>('/me');
   if (me.data && me.data.termsAccepted === false) return <TermsGate onAccepted={me.reload} />;
+  // sem o perfil o app não sabe o que mostrar: explica a queda (internet ou servidor) em vez de abrir telas vazias
+  if (!me.data && me.error) return <main><StatusPage kind={navigator.onLine ? 'unavailable' : 'offline'} onRetry={me.reload} /></main>;
   return <RoleProvider role={me.data?.role ?? null}><ShellInner onLogout={onLogout} me={me.data} /></RoleProvider>;
 }
 
@@ -73,24 +79,24 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
   const hasWa = role === 'owner' || role === 'manager' || role === 'reception'; // caixa do WhatsApp: quem atende o público
   const [view, setView] = useState<View>(() => viewFromHash(location.hash) ?? 'inicio');
   const [open, setOpen] = useState(false);
+  // endereço que não é tela nenhuma (#/xyz): mostra a página 404 com a Julia em vez de pular calado para o Início
+  const [lost, setLost] = useState(() => isLost(location.hash));
   useEffect(() => {
+    if (lost) return;
     const h = `#/${view}`;
     if (!location.hash) history.replaceState(null, '', h);
     else if (location.hash !== h) location.hash = h;
-  }, [view]);
+  }, [view, lost]);
   useEffect(() => {
-    const f = () => { const v = viewFromHash(location.hash); if (v) { setView(v); setOpen(false); scrollTo({ top: 0 }); } };
+    const f = () => { const v = viewFromHash(location.hash); setLost(isLost(location.hash)); if (v) { setView(v); setOpen(false); scrollTo({ top: 0 }); } };
     addEventListener('hashchange', f);
     return () => removeEventListener('hashchange', f);
   }, []);
-  // Quem não é dono/gerente nunca fica numa tela restrita (ex.: Financeiro), mesmo que o perfil mude com o app aberto.
+  // Quem não é dono/gerente nunca vê uma tela restrita (ex.: Financeiro), mesmo que o perfil mude com o app aberto.
   // Enquanto o perfil carrega, a tela restrita não é montada (nada de pedir dados que o servidor recusaria);
-  // com o perfil, sem acesso volta ao Início substituindo a entrada do histórico (senão o "voltar" ficaria preso entre as duas).
+  // com o perfil, a página 403 explica o motivo e leva ao Início substituindo a entrada do histórico (o "voltar" não fica preso).
   const it = NAV_ITEMS.find((i) => i.id === view);
   const blocked = !!((it?.mgr && !isManager) || (it?.front && !hasWa));
-  useEffect(() => {
-    if (role && blocked) { history.replaceState(null, '', '#/inicio'); setView('inicio'); }
-  }, [role, blocked]);
   const wa = useLoad<Conversation[]>(hasWa ? WA_BASE : null, view === 'whatsapp' ? 15_000 : 60_000);
   const waUnread = (wa.data ?? []).reduce((n, c) => n + c.unread, 0);
   // Estoque atual (não o aviso gravado pela rotina): some assim que o produto é reposto.
@@ -121,7 +127,7 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
   const [quick, setQuick] = useState(false);
   const [booking, setBooking] = useState(false);
   const [fresh, setFresh] = useState(0); // muda quando algo é criado, para as telas recarregarem
-  const go = (v: View, tab?: FinTab) => { if (tab) setFinTab(tab); setAutoPatient(false); setFocus(null); setView(v); setOpen(false); scrollTo({ top: 0 }); };
+  const go = (v: View, tab?: FinTab) => { if (tab) setFinTab(tab); setAutoPatient(false); setFocus(null); setLost(false); setView(v); setOpen(false); scrollTo({ top: 0 }); };
   const quickActions: QuickAction[] = [
     { icon: 'calendar', title: 'Agendar atendimento', hint: 'Escolha o dia e o horário', run: () => setBooking(true) },
     { icon: 'users', title: 'Cadastrar paciente', hint: 'Novo cadastro', run: () => { go('pacientes'); setAutoPatient(true); } },
@@ -131,7 +137,7 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
     ] : []),
   ];
   // abre a ficha do paciente (e, se vier, o atendimento) — usado pelo Início e pela Agenda
-  const openPatient = (patientId: string, appt: any | null) => { go('pacientes'); setFocus({ id: patientId, appt: appt ? { id: appt.id, label: `${appt.procedure ?? 'Atendimento'} · ${new Date(appt.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` } : undefined }); };
+  const openPatient = (patientId: string, appt: any | null) => { go('pacientes'); setFocus({ id: patientId, appt: appt ? { id: appt.id, label: `${appt.procedure ?? 'Atendimento'} · ${clock(new Date(appt.starts_at))}` } : undefined }); };
   const nAlerts = restock.data?.length ?? 0;
   const toSection = (id: string) => { go('inicio'); setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' }), 500); };
   const ATT_NUDGE: Record<string, { label: string; run: () => void } | undefined> = {
@@ -176,7 +182,7 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
     <div className={`shell${view === 'sara' || view === 'whatsapp' ? ' on-sara' : ''}`}>
       <header className="top">
         <button ref={menuBtn} className="icon-btn menu-btn" aria-label="Abrir menu" aria-expanded={open} onClick={() => setOpen(true)}><Icon name="menu" /></button>
-        <h1>{TITLE_OVERRIDE[view] ?? TITLES[view]}</h1>
+        <h1>{lost ? 'Não encontrada' : TITLE_OVERRIDE[view] ?? TITLES[view]}</h1>
         <div className="top-actions">
           <InstallPill />
           {isOwner && <PresenceButton />}
@@ -188,7 +194,7 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
       </header>
 
       <main>
-        {blocked ? <ListSkeleton rows={3} /> : <>
+        {lost ? <StatusPage kind="notfound" /> : blocked ? (role ? <StatusPage kind="forbidden" /> : <ListSkeleton rows={3} />) : <ErrorBoundary key={view}><Suspense fallback={<ListSkeleton rows={4} />}>
         {view === 'inicio' && <Today key={fresh} name={me?.name} restock={restock.data ?? []} go={go} money={isManager} onBook={() => setBooking(true)} onPatient={() => { go('pacientes'); setAutoPatient(true); }}
           onStart={openPatient} />}
         {view === 'config' && <Settings me={me} />}
@@ -199,11 +205,11 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
         {view === 'whatsapp' && hasWa && <WhatsApp list={wa} />}
         {(view === 'pacientes' || view === 'procedimentos' || view === 'mensagens') && <Cadastros section={view} autoOpen={autoPatient} focus={focus} onFinish={() => { go('inicio'); setFresh((n) => n + 1); }} />}
         {view === 'produtos' && <Cadastros section={'estoque' satisfies Section} />}
-        </>}
+        </Suspense></ErrorBoundary>}
       </main>
 
-      {view !== 'sara' && view !== 'whatsapp' && <BottomNav view={view} isManager={isManager} go={go} onQuick={() => setQuick(true)} onMenu={() => setOpen(true)} />}
-      {me && view !== 'sara' && <JuliaGuide view={view} userKey={me.email} nudges={nudges} context={context} suggest={suggest} />}
+      {view !== 'sara' && view !== 'whatsapp' && <BottomNav view={lost ? '' : view} isManager={isManager} go={go} onQuick={() => setQuick(true)} onMenu={() => setOpen(true)} />}
+      {me && view !== 'sara' && !lost && !(role && blocked) && <JuliaGuide view={view} userKey={me.email} nudges={nudges} context={context} suggest={suggest} />}
       {quick && <QuickSheet actions={quickActions} onClose={() => setQuick(false)} />}
       {booking && <AppointmentSheet onClose={() => setBooking(false)} onCreated={() => { setBooking(false); setFresh((n) => n + 1); }} />}
 
@@ -219,7 +225,7 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
               <div key={g.group} className="nav-group">
                 <p>{g.group}</p>
                 {g.items.map((i) => (
-                  <button key={i.id} aria-current={view === i.id ? 'page' : undefined} onClick={() => go(i.id)}>
+                  <button key={i.id} aria-current={!lost && view === i.id ? 'page' : undefined} onClick={() => go(i.id)}>
                     <Icon name={i.icon} size={20} />{i.label}{i.id === 'whatsapp' && waUnread > 0 && <span className="nav-badge" aria-label={`${waUnread} não lidas`}>{waUnread}</span>}
                   </button>
                 ))}
@@ -245,7 +251,11 @@ function Login({ onDone }: { onDone: () => void }) {
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true); setError('');
     try { const r = await api<{ token: string }>('/auth/login', { method: 'POST', json: { email, password } }); setToken(r.token); onDone(); }
-    catch (err) { setError(err instanceof Error && err.message === 'invalid credentials' ? 'E-mail ou senha incorretos.' : 'Não foi possível entrar. Tente novamente.'); }
+    catch (err) {
+      setError(!(err instanceof ApiError) ? (navigator.onLine ? 'O servidor não respondeu. Tente de novo em instantes.' : 'Você está sem internet. Confira a conexão e tente de novo.')
+        : err.status === 429 ? 'Muitas tentativas seguidas. Por segurança, aguarde alguns minutos antes de tentar de novo.'
+        : err.message === 'invalid credentials' ? 'E-mail ou senha incorretos.' : 'Não foi possível entrar. Tente novamente.');
+    }
     finally { setBusy(false); }
   }
   return (
@@ -254,6 +264,7 @@ function Login({ onDone }: { onDone: () => void }) {
     <form className="login" aria-label="Entrar" onSubmit={submit}>
       <span className="logo" aria-hidden="true"><img src="/neri-n.png" alt="" /></span>
       <h1>Clínica</h1>
+      <SessionExpiredNote />
       <p className="muted">Gestão na palma da mão.</p>
       <label>E-mail<input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
       <label>Senha<span className="pw"><input type={show ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /><button type="button" aria-label={show ? 'Ocultar senha' : 'Mostrar senha'} onClick={() => setShow((s) => !s)}><Icon name={show ? 'eyeoff' : 'eye'} size={20} /></button></span></label>
@@ -269,98 +280,85 @@ function Login({ onDone }: { onDone: () => void }) {
 const Status = ({ error, loading }: { error: string; loading: boolean }) =>
   error ? <p role="alert" className="err">{error}</p> : loading ? <ListSkeleton rows={3} /> : null;
 
-const Delta = ({ value }: { value: number | null }) =>
-  value === null ? null : <span className={`delta${value < 0 ? ' down' : ''}`}>{value < 0 ? '▼' : '▲'} {pct(Math.abs(value))}% <i>vs mês anterior</i></span>;
-
 // ---------- Início ----------
-const localYmd = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
 type Todo = { icon: IconName; text: string; hint?: string; tone?: 'bad'; run: () => void };
+type Stat = { icon: IconName; label: string; value: string; caption: string; dest: string; run: () => void; badge?: string; warn?: boolean; primary?: boolean; eye?: boolean };
 
-// O "meu dia": indicadores, quem é o próximo paciente, a agenda em linha do tempo e o que pede atenção. Dinheiro vem depois.
+// O "meu dia" numa tela só: resumo clicável, próximo paciente, agenda do dia e o que pede atenção.
+// No computador cabe sem rolar a página; a agenda e a coluna de pendências rolam por dentro.
 function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
   name?: string; restock: any[]; go: (v: View, tab?: FinTab) => void; money: boolean; onBook: () => void; onPatient: () => void;
   onStart: (patientId: string, appt: any | null) => void;
 }) {
   const dash = useLoad<any>('/dashboard');
   const att = useLoad<{ items: AttItem[] }>('/attention');
-  const sum = useLoad<any>(money ? `/finance/summary?month=${thisMonth()}` : null);
-  const recv = useLoad<any[]>(money ? '/finance/receivables' : null);
-  const pay = useLoad<any[]>(money ? '/finance/payables' : null);
-  const banks = useLoad<Bank[]>(money ? '/banks' : null);
   const { isClinical } = useRole();
   const { hours } = useHours();
   const [busyId, setBusyId] = useState('');
-  const [bump, setBump] = useState(0);
   const [moving, setMoving] = useState<any | null>(null);
   const [open, setOpen] = useState<any | null>(null);
   const [concluding, setConcluding] = useState('');
+  const [flash, setFlash] = useState(false);
   const { hidden } = useHideValues();
   const toast = useToast();
+  const tlRef = useRef<HTMLDivElement>(null);
+  const reload = () => { dash.reload(); att.reload(); };
 
   async function complete(id: string) {
     if (isClinical) { setOpen(null); setConcluding(id); return; } // owner/gerente/profissional: folha com baixa de estoque confirmada
     setBusyId(id);
-    try { await api(`/appointments/${id}/complete`, { method: 'POST', json: {} }); setOpen(null); dash.reload(); att.reload(); sum.reload(); recv.reload(); banks.reload(); setBump((b) => b + 1); }
+    try { await api(`/appointments/${id}/complete`, { method: 'POST', json: {} }); setOpen(null); reload(); }
     catch (e) { toast(completeErr(e)); }
     finally { setBusyId(''); }
   }
-  const d = dash.data, s = sum.data;
+  const d = dash.data;
   const now = Date.now();
-  const timeOf = (a: any) => new Date(a.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const timeOf = (a: any) => clock(new Date(a.starts_at));
   const today: any[] = d?.today ?? [];
   const pending = today.filter((a) => a.status !== 'done' && a.status !== 'canceled');
-  const doneToday = today.length - pending.length;
+  const doneToday = today.filter((a) => a.status === 'done').length;
   const ended = (a: any) => new Date(a.ends_at ?? a.starts_at).getTime() < now;
   const next = pending.find((a) => !ended(a)) ?? null;
   const late = pending.filter(ended);
   const patientsToday = new Set(today.map((a) => a.patient_id)).size;
-  const todayStr = localYmd();
-  const sumOf = (items: any[]) => items.reduce((acc, t) => acc + Number(t.amount), 0);
-  const dueRecv = (recv.data ?? []).filter((t) => String(t.due_date).slice(0, 10) <= todayStr);
-  const duePay = (pay.data ?? []).filter((t) => String(t.due_date).slice(0, 10) <= todayStr);
   const birthdays: { id: string; full_name: string }[] = d?.birthdays ?? [];
-  const goAgenda = () => document.getElementById('agenda-hoje')?.scrollIntoView({ behavior: 'smooth' });
+  const jump = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
+  const goAgenda = () => jump('agenda-hoje');
+  const focusAttn = () => {
+    const el = document.getElementById('pendencias');
+    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); el?.focus({ preventScroll: true });
+    setFlash(true); setTimeout(() => setFlash(false), 1200);
+  };
   // Ações da lista "Precisa de atenção". "Encaminhar" não tem tela própria: leva à agenda do dia.
   const onAttnAction = (kind: string) => {
     const ref = (att.data?.items as any[] | undefined)?.find((i) => i.kind === 'late_appointments')?.refs?.[0] ?? late[0]; // inclui dias anteriores
     if (kind === 'register') { if (ref) complete(ref.id); else goAgenda(); }
     else if (kind === 'reschedule') { if (ref) setMoving(ref); else goAgenda(); }
     else if (kind === 'check_status' || kind === 'forward') goAgenda();
-    else if (kind === 'open_returns') document.getElementById('retornos-do-dia')?.scrollIntoView({ behavior: 'smooth' });
+    else if (kind === 'open_returns') jump('retornos-do-dia');
     else if (kind === 'open_payables' || kind === 'open_receivables') go('financeiro', 'contas');
     else if (kind === 'open_lots' || kind === 'open_restock') go('estoque');
     else if (kind === 'open_birthdays') go('pacientes');
   };
 
+  // Reserva para quando /attention ainda não respondeu ou falhou: só o que o Início já sabe sozinho.
   const todo: Todo[] = [
     ...(late.length ? [{ icon: 'alert' as IconName, tone: 'bad' as const, text: `${late.length} atendimento(s) passaram do horário sem ser concluídos`, hint: late.map((a) => `${timeOf(a)} ${a.patient}`).join(' · '), run: goAgenda }] : []),
-    ...(dueRecv.length ? [{ icon: 'receive' as IconName, text: `${dueRecv.length} conta(s) a receber vencendo hoje ou vencida(s)`, hint: mask(brl(sumOf(dueRecv)), hidden), run: () => go('financeiro', 'contas') }] : []),
-    ...(duePay.length ? [{ icon: 'pay' as IconName, text: `${duePay.length} conta(s) a pagar vencendo hoje ou vencida(s)`, hint: mask(brl(sumOf(duePay)), hidden), run: () => go('financeiro', 'contas') }] : []),
     ...(restock.length ? [{ icon: 'box' as IconName, text: `${restock.length} produto(s) para repor`, hint: restock.map((p) => p.name).slice(0, 3).join(', '), run: () => go('estoque') }] : []),
     ...(birthdays.length ? [{ icon: 'users' as IconName, text: `Aniversário hoje: ${birthdays.map((p) => p.full_name).slice(0, 3).join(', ')}${birthdays.length > 3 ? ` e mais ${birthdays.length - 3}` : ''}`, hint: 'A mensagem automática sai às 9h se a paciente autorizou', run: () => go('pacientes') }] : []),
   ];
-
-  // Dinheiro (só dono e gerente), mais abaixo
-  const toReceive = sumOf(recv.data ?? []);
-  const activeBanks = (banks.data ?? []).filter((b) => b.active);
-  const balance = activeBanks.reduce((a, b) => a + b.balance, 0);
-  const byMonth = Object.fromEntries((d?.revenueByMonth ?? []).map((r: any) => [r.month, r.revenue]));
-  const series = lastMonths(6).map((month) => ({ month, m: monthLabel(month), revenue: byMonth[month] ?? 0 }));
-  const cur = series[series.length - 1]!, prev = series[series.length - 2]!;
-  const delta = prev.revenue ? ((cur.revenue - prev.revenue) / prev.revenue) * 100 : null;
-  const procTotal = (d?.topProcedures ?? []).reduce((a: number, p: any) => a + p.total, 0);
+  const nAtt = att.data ? att.data.items.length : todo.length;
+  const urgent = att.data?.items.filter((i) => i.urgency === 'high').length ?? 0;
   const first = name?.split(/\s+/)[0];
-  const tip = !money || todo.some((t) => t.icon === 'receive') ? null
-    : delta !== null && delta !== 0
-      ? { icon: 'pulse' as IconName, text: `Faturamento ${pct(Math.abs(delta))}% ${delta > 0 ? 'acima' : 'abaixo'} do mês anterior.`, cta: 'Ver resumo', run: () => go('financeiro', 'resumo') }
-      : null;
 
-  const kpis: { icon: IconName; label: string; value: string; hot?: boolean; eye?: boolean; primary?: boolean; badge?: string }[] = [
-    { icon: 'users', label: 'Pacientes hoje', value: String(patientsToday) },
-    { icon: 'check', label: 'Atendimentos concluídos', value: `${doneToday} de ${today.length}` },
-    { icon: 'alert', label: 'Pendências', value: String(att.data ? att.data.items.length : todo.length), hot: (att.data ? att.data.items.length : todo.length) > 0 },
-    ...(money ? [{ icon: 'wallet' as IconName, label: 'Faturamento do dia', value: mask(brl(d?.todayRevenue ?? 0), hidden), eye: true, primary: true, ...(delta !== null ? { badge: `${delta > 0 ? '+' : ''}${pct(delta)}% no mês` } : {}) }] : []),
+  const stats: Stat[] = [
+    { icon: 'users', label: 'Pacientes hoje', value: String(patientsToday), caption: `${today.length} na agenda hoje`, dest: 'Abrir pacientes', run: () => go('pacientes'),
+      ...(next ? { badge: `Próx. ${timeOf(next)}` } : {}) },
+    { icon: 'check', label: 'Concluídos hoje', value: `${doneToday} de ${today.length}`, caption: `${pending.length} por fazer`, dest: 'Abrir agenda', run: () => go('agenda'),
+      ...(late.length ? { badge: `${late.length} ${late.length === 1 ? 'atrasado' : 'atrasados'}`, warn: true } : {}) },
+    { icon: 'alert', label: 'Pendências', value: String(nAtt), caption: nAtt ? 'Ver a lista' : 'Tudo em dia', dest: 'Ir para a lista de pendências', run: focusAttn, primary: !money,
+      ...(urgent ? { badge: `${urgent} ${urgent === 1 ? 'urgente' : 'urgentes'}`, warn: true } : {}) },
+    ...(money ? [{ icon: 'wallet' as IconName, label: 'Faturamento do dia', value: mask(brl(d?.todayRevenue ?? 0), hidden), caption: 'Recebido hoje', dest: 'Abrir resumo financeiro', run: () => go('financeiro', 'resumo'), primary: true, eye: true }] : []),
   ];
   const quick: { icon: IconName; label: string; run: () => void }[] = [
     { icon: 'calendar', label: 'Novo agendamento', run: onBook },
@@ -369,39 +367,57 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
   ];
   const nextAge = next ? ageOf(next.birth_date) : null;
 
+  // a agenda rola por dentro: abre já mostrando o "agora"
+  useEffect(() => {
+    const sc = tlRef.current?.firstElementChild as HTMLElement | null;
+    const mark = sc?.querySelector<HTMLElement>('.tl-now');
+    if (sc && mark && sc.scrollHeight > sc.clientHeight) sc.scrollTop += mark.getBoundingClientRect().top - sc.getBoundingClientRect().top - sc.clientHeight / 3;
+  }, [d]);
+
   return (
-    <div className="dash">
-      <section className="hello span-all">
-        <h2>{greeting()}{first ? `, ${first}` : ''}</h2>
-        <p className="muted">{new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
-      </section>
-      <div className="span-all"><Status error={dash.error || sum.error} loading={!d || (money && !s)} /></div>
-      {d && (!money || s) && (
-        <>
-          <section className={`top-kpis n${kpis.length} span-all`} aria-label="Resumo do dia">
-            {kpis.map((k) => (
-              <div key={k.label} className={`tk${k.hot ? ' hot' : ''}${k.primary ? ' primary' : ''}`}>
-                <span className="tk-top"><span className="tk-ico"><Icon name={k.icon} size={18} /></span>{k.badge && <span className="tk-badge">{k.badge}</span>}</span>
-                <strong>{k.value}</strong>
-                <span className="tk-label">{k.label}{k.eye && <EyeToggle className="inline small" />}</span>
-              </div>
-            ))}
-          </section>
+    <div className="home">
+      <header className="home-hello">
+        <div>
+          <h2>{greeting()}{first ? `, ${first}` : ''}</h2>
+          <p className="muted">{new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+        </div>
+        <div className="home-quick" role="group" aria-label="Ações rápidas">
+          {quick.map((q) => <button key={q.label} type="button" onClick={q.run}><Icon name={q.icon} size={18} />{q.label}</button>)}
+        </div>
+      </header>
 
-          <div className="span-all"><DayStrip appts={today} onOpen={setOpen} /></div>
+      {!d ? <Status error={dash.error} loading={!d} /> : (
+        <div className="home-grid">
+          <div className="home-main">
+            <section className={`home-stats n${stats.length}`} aria-label="Resumo do dia">
+              {stats.map((k) => (
+                <div key={k.label} className={`hs${k.primary ? ' primary' : ''}`}>
+                  <button type="button" className="hs-link" onClick={k.run} aria-label={`${k.label}: ${k.value}. ${k.dest}`} />
+                  <span className="hs-top" aria-hidden="true">
+                    <span className="hs-ico"><Icon name={k.icon} size={18} /></span>
+                    {k.badge && <span className={`hs-badge${k.warn ? ' warn' : ''}`}>{k.badge}</span>}
+                  </span>
+                  <span className="hs-label" aria-hidden="true">{k.label}</span>
+                  <strong aria-hidden="true">{k.value}</strong>
+                  <span className="hs-foot">
+                    <small aria-hidden="true">{k.caption}</small>
+                    {k.eye && <EyeToggle className="inline small" />}
+                    <span className="hs-arrow" aria-hidden="true"><Icon name="arrow" size={16} /></span>
+                  </span>
+                </div>
+              ))}
+            </section>
 
-          <div className="day-grid span-all">
-            <section className="next-card g-next">
-              <span className="next-label">Próximo paciente</span>
+            <section className="card home-next" aria-labelledby="next-h">
+              <div className="home-head"><h2 id="next-h">Próximo paciente</h2>{next && <span className="next-time"><Icon name="calendar" size={16} />{timeOf(next)}</span>}</div>
               {next ? (
                 <>
                   <div className="next-main">
-                    <Avatar name={next.patient} size={64} />
+                    <Avatar name={next.patient} size={48} />
                     <div className="grow">
                       <b>{next.patient}</b>
-                      <span>{[nextAge !== null ? `${nextAge} anos` : null, next.procedure ?? 'Sem procedimento'].filter(Boolean).join(' · ')}</span>
+                      <span className="muted">{[nextAge !== null ? `${nextAge} anos` : null, next.procedure ?? 'Sem procedimento'].filter(Boolean).join(' · ')}</span>
                     </div>
-                    <span className="next-time"><Icon name="calendar" size={16} />{timeOf(next)}</span>
                   </div>
                   <div className="next-actions">
                     {isClinical ? (
@@ -416,247 +432,50 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
                       </>
                     )}
                   </div>
-                  {isClinical && <button className="next-link" onClick={() => setMoving(next)}>Reagendar este atendimento</button>}
+                  {isClinical && <button className="link small home-next-link" onClick={() => setMoving(next)}>Reagendar este atendimento</button>}
                 </>
-              ) : <p className="next-empty">{today.length === 0 ? 'Nenhum paciente para hoje.' : late.length ? 'Os atendimentos restantes de hoje já passaram do horário.' : 'Todos os atendimentos de hoje foram concluídos.'}</p>}
+              ) : <p className="muted">{today.length === 0 ? 'Nenhum paciente para hoje.' : late.length ? 'Os atendimentos restantes de hoje já passaram do horário.' : 'Todos os atendimentos de hoje foram concluídos.'}</p>}
             </section>
+          </div>
 
-            <aside className="g-side">
-            {att.data ? (
-              <section className="card attn g-attn" id="pendencias">
-                <div className="attn-head"><h2>Precisa de atenção</h2><span className="badge" aria-label={`${att.data.items.length} pendência(s)`}>{att.data.items.length}</span></div>
-                {att.data.items.length === 0
+          <div className="home-tl" ref={tlRef}>
+            <DayTimeline appts={today} hours={hours} onOpen={setOpen} onBook={onBook} onSeeAll={() => go('agenda')} />
+          </div>
+
+          <aside className="home-side" aria-label="Pendências e retornos">
+            <section className={`card home-attn${flash ? ' flash' : ''}`} id="pendencias" tabIndex={-1} aria-labelledby="attn-h">
+              <div className="attn-head"><h2 id="attn-h">Precisa de atenção</h2>{nAtt > 0 && <span className="badge" aria-label={`${nAtt} pendência(s)`}>{nAtt}</span>}</div>
+              {att.data ? (
+                att.data.items.length === 0
                   ? <p className="muted">Tudo em dia. Nada pendente por enquanto.</p>
-                  : <AtencaoLista items={att.data.items} hidden={hidden} onAction={onAttnAction} />}
-              </section>
-            ) : todo.length > 0 ? (
-              <section className="card attn g-attn" id="pendencias">
-                <div className="attn-head"><h2>Precisa de atenção</h2><span className="badge" aria-label={`${todo.length} pendência(s)`}>{todo.length}</span></div>
+                  : <AtencaoLista items={att.data.items} hidden={hidden} onAction={onAttnAction} />
+              ) : todo.length > 0 ? (
                 <ul className="todo">{todo.map((t) => (
                   <li key={t.text}>
                     <button onClick={t.run}>
                       <span className={`q-ico ${t.tone === 'bad' ? 'bad' : ''}`}><Icon name={t.icon} size={20} /></span>
                       <span className="grow"><b>{t.text}</b>{t.hint && <span className="muted wrap">{t.hint}</span>}</span>
-                      <Icon name="back" size={18} />
+                      <Icon name="arrow" size={18} />
                     </button>
                   </li>
                 ))}</ul>
-              </section>
-            ) : (
-              <section className="card attn ok g-attn" id="pendencias">
-                <span className="q-ico"><Icon name="check" size={20} /></span>
-                <div className="grow"><b>Tudo em dia</b><span className="muted">Nada pendente por enquanto.</span></div>
-              </section>
-            )}
-
-            <section className="card quick-card g-quick" aria-label="Ações rápidas">
-              <h2>Ações rápidas</h2>
-              <div className="qgrid">
-                {quick.map((q) => <button key={q.label} onClick={q.run}><span><Icon name={q.icon} size={22} /></span><b>{q.label}</b></button>)}
-              </div>
+              ) : att.error ? <p className="muted">Não foi possível carregar as pendências agora.</p> : <ListSkeleton rows={2} />}
             </section>
-            </aside>
-
-            <div className="span-all"><RetornosDoDia /></div>
-
-            <DayTimeline appts={today} hours={hours} onOpen={setOpen} onBook={onBook} onSeeAll={() => go('agenda')} />
-
-          </div>
-
-          {money && s && (
-            <section className="hero-card span-all">
-              <div className="hero-main">
-                <span>Faturamento do mês<EyeToggle className="on-dark inline" /></span>
-                <strong>{mask(brl(s.income), hidden)}</strong>
-                {delta === null ? <span className="delta flat">Primeiro mês</span> : <Delta value={delta} />}
-                {activeBanks.length > 0 && <button className="hero-balance" onClick={() => go('financeiro', 'bancos')}><Icon name="bank" size={16} />Saldo em contas <b>{mask(brl(balance), hidden)}</b></button>}
-              </div>
-              <div className="spark" aria-hidden="true">
-                <ResponsiveContainer width="100%" height={56}>
-                  <AreaChart data={series} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
-                    <defs><linearGradient id="g-hero" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" style={{ stopColor: 'var(--yellow)', stopOpacity: 0.35 }} /><stop offset="100%" style={{ stopColor: 'var(--yellow)', stopOpacity: 0 }} />
-                    </linearGradient></defs>
-                    <Area type="monotone" dataKey="revenue" stroke="var(--yellow)" strokeWidth={2} fill="url(#g-hero)" isAnimationActive={false} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </section>
-          )}
-
-          {money && s && (
-            <section className="kpis span-all">
-              <button className="kpi" onClick={() => go('financeiro')}><Icon name="syringe" size={18} /><span>Procedimentos no mês</span><strong>{s.proceduresDone}</strong></button>
-              <button className="kpi" onClick={() => go('financeiro')}><Icon name="wallet" size={18} /><span>Ticket médio</span><strong>{mask(brl(s.averageTicket), hidden)}</strong></button>
-              <button className="kpi" onClick={() => go('financeiro', 'contas')}><Icon name="receive" size={18} /><span>A receber</span><strong>{mask(brl(toReceive), hidden)}</strong><small>{recv.data?.length ?? 0} pendente(s) de pagamento</small></button>
-            </section>
-          )}
-
-          {tip && (
-            <section className="card tip span-all">
-              <span className="q-ico"><Icon name={tip.icon} size={20} /></span>
-              <div className="grow"><b>{tip.text}</b></div>
-              <button className="link" onClick={tip.run}>{tip.cta}</button>
-            </section>
-          )}
-
-          {money && <PainelCiclo />}
-          {money && <RecentTransactions limit={5} reloadKey={bump} onSeeAll={() => go('financeiro', 'contas')} />}
-
-          {money && (
-            <section className="card">
-              <div className="between"><h2>Faturamento mensal</h2><Delta value={delta} /></div>
-              <div className="big-fig"><strong>{mask(brl(cur.revenue), hidden)}</strong><span>neste mês</span></div>
-              <div className="chart" role="img" aria-label="Gráfico de barras do faturamento dos últimos 6 meses">
-                <ResponsiveContainer width="100%" height={200}>
-                  <BarChart data={series} margin={{ top: 8, right: 8, left: -14, bottom: 0 }}>
-                    <CartesianGrid vertical={false} stroke="var(--line)" />
-                    <XAxis dataKey="m" tickLine={false} axisLine={false} tick={{ fill: 'var(--muted)', fontSize: 12 }} />
-                    <YAxis tickLine={false} axisLine={false} width={52} tick={{ fill: 'var(--muted)', fontSize: 12 }} tickFormatter={(v) => (v >= 1000 ? `${Math.round(v / 100) / 10}k` : v)} />
-                    <Tooltip formatter={(v: number) => [hidden ? '••••' : brl(v), 'Receita']}
-                      contentStyle={{ background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--ink)' }} />
-                    <Bar dataKey="revenue" radius={[10, 10, 10, 10]} maxBarSize={34}>
-                      {series.map((r, i) => <Cell key={r.month} fill={i === series.length - 1 ? 'var(--c1)' : 'var(--c4)'} />)}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </section>
-          )}
-
-          <section className="card">
-            <h2>Procedimentos mais realizados</h2>
-            {procTotal === 0 ? <p className="muted">Sem atendimentos concluídos no período.</p> : (
-              <div className="donut-row">
-                <div className="donut" role="img" aria-label="Proporção dos procedimentos realizados">
-                  <ResponsiveContainer width="100%" height={168}>
-                    <PieChart>
-                      <Pie data={d.topProcedures} dataKey="total" nameKey="name" innerRadius="66%" outerRadius="100%" cornerRadius={8} paddingAngle={d.topProcedures.length > 1 ? 4 : 0} stroke="none" isAnimationActive={false}>
-                        {d.topProcedures.map((p: any, i: number) => <Cell key={p.name} fill={`var(--c${(i % 6) + 1})`} />)}
-                      </Pie>
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div className="donut-total"><strong>{procTotal}</strong><span>realizados</span></div>
-                </div>
-                <ul className="legend">
-                  {d.topProcedures.map((p: any, i: number) => (
-                    <li key={p.name}><i style={{ background: `var(--c${(i % 6) + 1})` }} /><span>{p.name}</span><b>{pct((p.total / procTotal) * 100)}%</b></li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </section>
-          <GoogleCard />
-        </>
+            <RetornosDoDia />
+          </aside>
+        </div>
       )}
       {open && <ApptSheet appt={open} clinical={isClinical} busy={busyId === open.id} onClose={() => setOpen(null)}
         onStart={() => { const a = open; setOpen(null); onStart(a.patient_id, a); }} onChart={() => { const a = open; setOpen(null); onStart(a.patient_id, null); }}
         onComplete={() => complete(open.id)} onMove={() => { setMoving(open); setOpen(null); }} />}
-      {concluding && <ConcluirAtendimento appointmentId={concluding} onClose={() => setConcluding('')} onDone={() => { dash.reload(); att.reload(); sum.reload(); recv.reload(); banks.reload(); setBump((b) => b + 1); }} />}
-      {moving && <RescheduleSheet appt={moving} onClose={() => setMoving(null)} onDone={() => { setMoving(null); dash.reload(); att.reload(); }} />}
+      {concluding && <ConcluirAtendimento appointmentId={concluding} onClose={() => setConcluding('')} onDone={reload} />}
+      {moving && <RescheduleSheet appt={moving} onClose={() => setMoving(null)} onDone={() => { setMoving(null); reload(); }} />}
     </div>
   );
 }
 
-// ---------- Agenda ----------
-// dia no fuso da clínica (toISOString é UTC: depois das 21h já seria amanhã e os atendimentos da noite sumiriam)
-const dayISO = (plusDays = 0) => new Date(Date.now() + plusDays * 864e5).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
-
-function Agenda({ onStart }: { onStart: (patientId: string, appt: any | null) => void }) {
-  const { isClinical } = useRole();
-  const [week, setWeek] = useState(0); // 0 = a partir de hoje; cada passo anda 7 dias
-  const from = dayISO(week * 7), to = dayISO(week * 7 + 6);
-  const ap = useLoad<any[]>(`/appointments?from=${from}&to=${to}`);
-  const [open, setOpen] = useState<any | null>(null);
-  const [moving, setMoving] = useState<any | null>(null);
-  const [concluding, setConcluding] = useState('');
-  const [busy, setBusy] = useState(false);
-  const toast = useToast();
-  async function complete(id: string) {
-    if (isClinical) { setOpen(null); setConcluding(id); return; } // mesma regra do Início: perfil clínico confirma a baixa de estoque
-    setBusy(true);
-    try { await api(`/appointments/${id}/complete`, { method: 'POST', json: {} }); setOpen(null); ap.reload(); }
-    catch (e) { toast(completeErr(e)); }
-    finally { setBusy(false); }
-  }
-  const range = `${new Date(`${from}T12:00`).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })} a ${new Date(`${to}T12:00`).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })}`;
-  const days = new Map<string, any[]>();
-  for (const a of ap.data ?? []) {
-    const k = new Date(a.starts_at).toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
-    days.set(k, [...(days.get(k) ?? []), a]);
-  }
-  const STATUS: Record<string, string> = { scheduled: 'Agendado', confirmed: 'Confirmado', done: 'Concluído', canceled: 'Cancelado', no_show: 'Faltou' };
-  return (
-    <>
-      <div className="between">
-        <div className="week-nav">
-          <button className="icon-btn" aria-label="Semana anterior" disabled={week === 0} onClick={() => setWeek((w) => w - 1)}><Icon name="back" size={20} /></button>
-          <p className="muted" aria-live="polite">{week === 0 ? 'Próximos 7 dias' : range}</p>
-          <button className="icon-btn fwd" aria-label="Próxima semana" onClick={() => setWeek((w) => w + 1)}><Icon name="back" size={20} /></button>
-        </div>
-        <NewAppointment onCreated={ap.reload} />
-      </div>
-      <Status error={ap.error} loading={!ap.data} />
-      {ap.data && days.size === 0 && <section className="card"><Empty icon="calendar" title="Agenda livre" text={week === 0 ? 'Nenhum atendimento nos próximos 7 dias.' : `Nenhum atendimento de ${range}`} /></section>}
-      {[...days].map(([day, items]) => (
-        <section key={day} className="card list-card">
-          <h2 className="cap pad">{day}</h2>
-          <ul className="rows">
-            {items.map((a) => (
-              <li key={a.id}>
-                <button className="row-btn" onClick={() => setOpen(a)} disabled={a.status === 'canceled'}>
-                  <b className="appt-time">{new Date(a.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</b>
-                  <span className="grow"><b>{a.patient}</b><span className="muted">{a.procedure ?? 'Sem procedimento'}</span></span>
-                  {isLate(a)
-                    ? <span className="pill warn">Atrasado</span>
-                    : <span className={`pill ${a.status === 'done' ? 'ok' : a.status === 'canceled' || a.status === 'no_show' ? 'warn' : ''}`}>{STATUS[a.status] ?? a.status}</span>}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
-      {open && <ApptSheet appt={open} clinical={isClinical} busy={busy} onClose={() => setOpen(null)}
-        onStart={() => { const a = open; setOpen(null); onStart(a.patient_id, a); }} onChart={() => { const a = open; setOpen(null); onStart(a.patient_id, null); }}
-        onComplete={() => complete(open.id)} onMove={() => { setMoving(open); setOpen(null); }} />}
-      {moving && <RescheduleSheet appt={moving} onClose={() => setMoving(null)} onDone={() => { setMoving(null); ap.reload(); }} />}
-      {concluding && <ConcluirAtendimento appointmentId={concluding} onClose={() => setConcluding('')} onDone={ap.reload} />}
-    </>
-  );
-}
-
-function GoogleCard() {
-  const st = useLoad<{ connected: boolean }>('/google/status');
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState('');
-  const run = async (fn: () => Promise<void>) => {
-    setBusy(true); setMsg('');
-    try { await fn(); } catch { setMsg('Não foi possível concluir. Tente novamente.'); } finally { setBusy(false); }
-  };
-  if (!st.data) return null;
-  return (
-    <section className="card">
-      <h2>Google Agenda</h2>
-      {st.data.connected ? (
-        <>
-          <p className="muted">Conectado. Agendamentos e alterações são sincronizados a cada 5 minutos.</p>
-          <div className="actions">
-            <button className="ghost" disabled={busy} onClick={() => run(async () => { await api('/google/sync', { method: 'POST', json: {} }); setMsg(`Sincronizado às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.`); })}>Sincronizar agora</button>
-            <button className="ghost" disabled={busy} onClick={() => run(async () => { await api('/google', { method: 'DELETE' }); st.reload(); })}>Desconectar</button>
-          </div>
-        </>
-      ) : (
-        <>
-          <p className="muted">Veja a agenda da clínica também no Google Agenda do seu celular.</p>
-          <div className="actions">
-            <button className="primary" disabled={busy} onClick={() => run(async () => { const r = await api<{ url: string }>('/google/connect', { method: 'POST', json: {} }); location.href = r.url; })}>Conectar Google Agenda</button>
-          </div>
-        </>
-      )}
-      {msg && <p className="muted" role="status">{msg}</p>}
-    </section>
-  );
-}
+// ---------- Agenda ---------- (calendário em AgendaView.tsx)
+const Agenda = ({ onStart }: { onStart: (patientId: string, appt: any | null) => void }) => <AgendaView onStart={onStart} completeErr={completeErr} />;
 
 // ---------- Estoque ----------
 function Stock({ go }: { go: (v: View, tab?: FinTab) => void }) {
@@ -763,12 +582,17 @@ function Julia({ name }: { name?: string }) {
             </div>
           </div>
         )}
-        {msgs.map((m, i) => (
-          <div key={i} className={`bubble ${m.role}`}>{m.text}
-            {m.retry && <button className="ghost sm retry" disabled={busy} onClick={() => { setMsgs((x) => x.slice(0, i - 1)); send(m.retry!); }}>Tentar novamente</button>}
-          </div>
-        ))}
-        {busy && <div className="bubble sara muted">Julia está consultando os dados…</div>}
+        {msgs.map((m, i) => {
+          const b = (
+            <div key={i} className={`bubble ${m.role}`}>{m.text}
+              {m.retry && <button className="ghost sm retry" disabled={busy} onClick={() => { setMsgs((x) => x.slice(0, i - 1)); send(m.retry!); }}>Tentar novamente</button>}
+            </div>
+          );
+          return m.role === 'user' ? b : (
+            <div key={i} className="julia-row"><span className="julia-avatar" aria-hidden="true"><Mascote variant="head" size={34} /></span>{b}</div>
+          );
+        })}
+        {busy && <div className="julia-row"><span className="julia-avatar" aria-hidden="true"><Mascote variant="head" size={34} mood="think" /></span><div className="bubble sara muted">Julia está consultando os dados…</div></div>}
         <div ref={end} />
       </div>
       <form className="composer" onSubmit={(e) => { e.preventDefault(); send(text); }}>

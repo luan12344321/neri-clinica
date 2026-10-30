@@ -25,7 +25,7 @@ export function authUrl(state) {
 
 export async function exchangeCode(code) {
   const c = cfg();
-  const r = await fetch(c.token, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  const r = await fetch(c.token, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: AbortSignal.timeout(10_000),
     body: form({ code, client_id: c.id, client_secret: c.secret, redirect_uri: c.redirect, grant_type: 'authorization_code' }) });
   const j = await r.json();
   if (!r.ok || !j.refresh_token) throw new Error(`google token exchange failed: ${j.error ?? r.status}`);
@@ -37,7 +37,7 @@ async function accessToken(user) {
   const hit = tokens.get(user.id);
   if (hit && hit.exp > Date.now() + 30_000) return hit.token;
   const c = cfg();
-  const r = await fetch(c.token, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  const r = await fetch(c.token, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: AbortSignal.timeout(10_000),
     body: form({ refresh_token: decrypt(user.google_refresh_token_enc, tokenAad(user.id)), client_id: c.id, client_secret: c.secret, grant_type: 'refresh_token' }) });
   const j = await r.json();
   if (!r.ok) throw Object.assign(new Error(`google refresh failed: ${j.error ?? r.status}`), { status: r.status });
@@ -48,7 +48,7 @@ async function accessToken(user) {
 async function gcal(user, path, { method = 'GET', body } = {}) {
   const r = await fetch(`${cfg().api}/calendars/${encodeURIComponent(user.google_calendar_id ?? 'primary')}${path}`, {
     method, headers: { Authorization: `Bearer ${await accessToken(user)}`, 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined });
+    body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(10_000) });
   if (r.status === 204) return {};
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw Object.assign(new Error(`google ${method} ${path}: ${r.status}`), { status: r.status });
@@ -58,21 +58,21 @@ async function gcal(user, path, { method = 'GET', body } = {}) {
 // Agenda de quem atende (ou o 1º usuário conectado da clínica).
 const calendarOwner = async (clinicId, professionalId) => (await q(
   `SELECT id, google_refresh_token_enc, google_calendar_id, google_sync_token FROM users
-   WHERE clinic_id=$1 AND google_refresh_token_enc IS NOT NULL ORDER BY (id=$2) DESC, created_at LIMIT 1`,
+   WHERE clinic_id=$1 AND google_refresh_token_enc IS NOT NULL AND password_hash <> '!' ORDER BY (id=$2) DESC, created_at LIMIT 1`,
   [clinicId, professionalId]))[0];
 
 // ---- push: app -> Google ----
 export async function pushAppointment(appointmentId) {
   const [a] = await q(
     `SELECT a.*, p.full_name AS patient, pr.name AS procedure, c.timezone
-     FROM appointments a JOIN patients p ON p.id=a.patient_id JOIN clinics c ON c.id=a.clinic_id
-     LEFT JOIN procedures pr ON pr.id=a.procedure_id WHERE a.id=$1`, [appointmentId]);
+     FROM appointments a JOIN patients p ON p.id=a.patient_id AND p.clinic_id=a.clinic_id JOIN clinics c ON c.id=a.clinic_id
+     LEFT JOIN procedures pr ON pr.id=a.procedure_id AND pr.clinic_id=a.clinic_id WHERE a.id=$1`, [appointmentId]);
   if (!a) return;
   const owner = await calendarOwner(a.clinic_id, a.professional_id);
   if (!owner) return; // clínica sem Google conectado
 
   if (a.status === 'canceled') {
-    if (a.google_event_id) await gcal(owner, `/events/${a.google_event_id}`, { method: 'DELETE' }).catch((e) => { if (e.status !== 410 && e.status !== 404) throw e; });
+    if (a.google_event_id) await gcal(owner, `/events/${encodeURIComponent(a.google_event_id)}`, { method: 'DELETE' }).catch((e) => { if (e.status !== 410 && e.status !== 404) throw e; });
     return;
   }
   const event = {
@@ -81,7 +81,7 @@ export async function pushAppointment(appointmentId) {
     end: { dateTime: a.ends_at.toISOString(), timeZone: a.timezone },
   };
   const ev = a.google_event_id
-    ? await gcal(owner, `/events/${a.google_event_id}`, { method: 'PATCH', body: event })
+    ? await gcal(owner, `/events/${encodeURIComponent(a.google_event_id)}`, { method: 'PATCH', body: event })
     : await gcal(owner, '/events', { method: 'POST', body: event });
   await q('UPDATE appointments SET google_event_id=$2, google_etag=$3 WHERE id=$1', [a.id, ev.id, ev.etag]);
 }
@@ -100,8 +100,9 @@ async function applyEvent(clinicId, ev) {
 }
 
 async function pullChanges(user, clinicId) {
-  let syncToken = user.google_sync_token, pageToken, next;
+  let syncToken = user.google_sync_token, pageToken, next, pages = 0;
   do {
+    if (++pages > 50) throw new Error('google pull: páginas demais'); // teto contra laço (410 repetido, paginação sem fim)
     const params = new URLSearchParams(syncToken ? { syncToken } : { timeMin: new Date(Date.now() - 30 * 864e5).toISOString(), singleEvents: 'true' });
     if (pageToken) params.set('pageToken', pageToken);
     let res;
@@ -123,12 +124,12 @@ export async function syncClinic(clinicId) {
        AND status IN ('scheduled','confirmed') AND starts_at > now() ORDER BY starts_at LIMIT 50`, [clinicId]);
   for (const p of pending) await pushAppointment(p.id).catch(() => {});
   const users = await q(`SELECT id, google_refresh_token_enc, google_calendar_id, google_sync_token FROM users
-                         WHERE clinic_id=$1 AND google_refresh_token_enc IS NOT NULL`, [clinicId]);
+                         WHERE clinic_id=$1 AND google_refresh_token_enc IS NOT NULL AND password_hash <> '!'`, [clinicId]);
   for (const u of users) await pullChanges(u, clinicId);
 }
 
 export const syncAllClinics = async () => {
-  for (const c of await q(`SELECT DISTINCT clinic_id FROM users WHERE google_refresh_token_enc IS NOT NULL`)) {
+  for (const c of await q(`SELECT DISTINCT clinic_id FROM users WHERE google_refresh_token_enc IS NOT NULL AND password_hash <> '!'`)) {
     await syncClinic(c.clinic_id).catch((e) => console.error('google sync', c.clinic_id, e.message));
   }
 };
@@ -152,7 +153,7 @@ export default async function googleRoutes(app) {
     try { s = app.jwt.verify(state); } catch { return reply.code(400).send({ error: 'invalid state' }); }
     if (s.purpose !== 'google-oauth' || !code) return reply.code(400).send({ error: 'invalid state' });
     const refresh = await exchangeCode(code);
-    const [u] = await q('UPDATE users SET google_refresh_token_enc=$2, google_sync_token=NULL WHERE id=$1 RETURNING clinic_id',
+    const [u] = await q(`UPDATE users SET google_refresh_token_enc=$2, google_sync_token=NULL WHERE id=$1 AND password_hash <> '!' RETURNING clinic_id`,
       [s.userId, encrypt(refresh, tokenAad(s.userId))]);
     if (u) await audit({ clinicId: u.clinic_id, userId: s.userId, ip: req.ip }, 'google.connect', 'user', s.userId);
     return reply.redirect(process.env.APP_URL ?? 'http://localhost:5173');

@@ -57,7 +57,7 @@ export default function WhatsApp({ list }: { list: { data: Conversation[] | null
           {!list.data && !list.error && <ListSkeleton rows={5} />}
           {list.error && !list.data && <p role="alert" className="err">Não foi possível carregar as conversas.</p>}
           {list.data && !shown.length && (
-            <Empty icon="mail" title={list.data.length ? 'Nenhuma conversa encontrada' : 'Nenhuma conversa ainda'}
+            <Empty icon="whatsapp" title={list.data.length ? 'Nenhuma conversa encontrada' : 'Nenhuma conversa ainda'}
               text={list.data.length ? undefined : 'Quando um cliente escrever para o WhatsApp da clínica, a conversa aparece aqui.'} />
           )}
           {shown.map((c) => (
@@ -78,7 +78,7 @@ export default function WhatsApp({ list }: { list: { data: Conversation[] | null
       <section className="wa-chat" aria-label="Conversa aberta">
         {active
           ? <Thread key={active.contact} conv={active} onBack={() => setCurrent(null)} onChanged={list.reload} />
-          : <div className="wa-blank"><Empty icon="mail" title="Escolha uma conversa" text="As mensagens dos clientes aparecem aqui. Ao responder, a Julia para de atender essa conversa." /></div>}
+          : <div className="wa-blank"><Empty icon="whatsapp" title="Escolha uma conversa" text="As mensagens dos clientes aparecem aqui. Ao responder, a Julia para de atender essa conversa." /></div>}
       </section>
     </div>
   );

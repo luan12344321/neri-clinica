@@ -12,9 +12,24 @@
     <meta name="apple-mobile-web-app-title" content="Clínica" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Clínica — Gestão</title>
+    <!-- CSS crítico da primeira pintura (antes do app carregar). Cores = tokens de styles.css (--bg, --ink, --muted, --accent). -->
+    <style>
+      .boot { min-height: 100dvh; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 24px; text-align: center;
+        background: #f2f0e8; color: #16211d; font: 16px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+      .boot img { width: 56px; height: 56px; border-radius: 16px; }
+      .boot-bar { width: 120px; height: 4px; border-radius: 4px; background: #e3dfd3; overflow: hidden; }
+      .boot-bar::after { content: ''; display: block; width: 40%; height: 100%; background: #1d4d3b; animation: boot 1.1s ease-in-out infinite alternate; }
+      .boot-late { max-width: 36ch; margin: 0; color: #5a6662; font-size: 14px; opacity: 0; animation: boot-late 0s 8s forwards; }
+      @keyframes boot { to { transform: translateX(150%); } }
+      @keyframes boot-late { to { opacity: 1; } }
+      @media (prefers-reduced-motion: reduce) { .boot-bar::after { animation: none; } }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <noscript><div class="boot"><img src="/neri-n.png" alt="" /><p><b>Ative o JavaScript para usar o sistema.</b><br />O app da clínica precisa dele para funcionar neste navegador.</p></div></noscript>
+    <!-- Some sozinho quando o app abre. Se ficar (navegador muito antigo), a mensagem explica o que fazer. -->
+    <div id="root"><div class="boot" role="status"><img src="/neri-n.png" alt="" /><span class="boot-bar" aria-hidden="true"></span><span>Abrindo a clínica…</span>
+      <p class="boot-late">Está demorando? Confira a internet. Se nada mudar, este navegador pode ser antigo demais: use Chrome, Safari, Edge ou Firefox atualizados.</p></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

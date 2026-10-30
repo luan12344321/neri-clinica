@@ -23,6 +23,11 @@ const asaasStub = (over = {}) => {
     'GET /payments/pay_1/pixQrCode': () => ({ payload: '00020126ASAASPIX6304ABCD', expirationDate: '2026-12-31 23:59:59', encodedImage: 'x' }),
     'GET /finance/balance': () => ({ balance: 10 }),
     'DELETE /payments/pay_1': () => ({ deleted: true }),
+    // consulta que o webhook faz para confirmar: devolve a cobrança criada (mesmo valor e referência), já recebida
+    'GET /payments/pay_1': () => {
+      const created = calls.findLast((c) => c.key === 'POST /payments')?.body;
+      return { id: 'pay_1', status: 'RECEIVED', value: created?.value, netValue: created ? created.value - 1.99 : undefined, externalReference: created?.externalReference };
+    },
   };
   globalThis.fetch = async (url, init = {}) => {
     const u = new URL(url);
@@ -127,6 +132,26 @@ test('webhook: pagamento recebido dá baixa na conta do Asaas, registra a tarifa
   assert.equal((await t.sql(`SELECT count(*)::int n FROM transactions WHERE external_id='asaas-fee:pay_1'`))[0].n, 1);
   assert.equal((await bank()).balance, 1198.01);
   assert.equal((await t.call('GET', `/finance/transactions/${tx.id}/status`, { token: owner })).json.status, 'paid');
+});
+
+test('webhook forjado não dá baixa: o Asaas é consultado e precisa confirmar recebimento, referência e valor (B-07)', async () => {
+  asaasStub();
+  const { tx } = await receivable();
+  await charge(tx.id);
+  const pending = async () => (await t.sql('SELECT status FROM transactions WHERE id=$1', [tx.id]))[0].status;
+  for (const fake of [
+    { status: 'PENDING', value: tx.a, externalReference: tx.id },
+    { status: 'RECEIVED', value: tx.a, externalReference: '00000000-0000-0000-0000-000000000000' },
+    { status: 'RECEIVED', value: 0.01, externalReference: tx.id },
+  ]) {
+    asaasStub({ 'GET /payments/pay_1': () => ({ id: 'pay_1', ...fake }) });
+    const r = await webhook(received, WEBHOOK);
+    assert.equal(r.status, 200);
+    assert.equal(await pending(), 'pending', JSON.stringify(fake));
+  }
+  asaasStub({ 'GET /payments/pay_1': () => [500, {}] });
+  assert.equal((await webhook(received, WEBHOOK)).status, 502, 'Asaas fora do ar: pede reenvio em vez de dar baixa');
+  assert.equal(await pending(), 'pending');
 });
 
 test('webhook de cobrança desconhecida responde 200 e não altera nada (não pode travar a fila do Asaas)', async () => {

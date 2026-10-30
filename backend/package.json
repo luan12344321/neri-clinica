@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch --env-file=.env src/server.js",
+    "dev:local": "node --env-file=.env scripts/dev-local.js",
     "start": "node --env-file=.env src/server.js",
     "db:init": "node --env-file=.env scripts/seed.js",
     "db:schema": "node --env-file=.env scripts/migrate.js",

@@ -1,6 +1,7 @@
 import { createPortal } from 'react-dom';
 import { Component, createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Icon, type IconName } from './Icon';
+import { StatusPage, isStaleChunk } from './StatusPage';
 
 // ---------- Aviso rápido (toast) ----------
 const ToastCtx = createContext<(msg: string) => void>(() => {});
@@ -114,6 +115,21 @@ export const EyeToggle = ({ className = '' }: { className?: string }) => {
   return <button className={`eye ${className}`} aria-label={hidden ? 'Mostrar valores' : 'Ocultar valores'} aria-pressed={hidden} onClick={toggle}><Icon name={hidden ? 'eyeoff' : 'eye'} size={20} /></button>;
 };
 
+// ---------- Ação que pede confirmação (o mesmo padrão de "Remover acesso" da Equipe) ----------
+// Primeiro toque mostra o que vai acontecer; só o segundo executa. Sem janela por cima de janela.
+export function ConfirmButton({ label, confirm, text, onConfirm, disabled }: { label: string; confirm: string; text: string; onConfirm: () => void; disabled?: boolean }) {
+  const [ask, setAsk] = useState(false);
+  const yes = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (ask) yes.current?.focus(); }, [ask]);
+  if (!ask) return <button className="ghost danger" disabled={disabled} onClick={() => setAsk(true)}>{label}</button>;
+  return (
+    <div role="group" aria-label={label}>
+      <p className="muted">{text}</p>
+      <div className="actions"><button ref={yes} className="ghost danger" disabled={disabled} onClick={() => { setAsk(false); onConfirm(); }}>{confirm}</button><button className="ghost" onClick={() => setAsk(false)}>Cancelar</button></div>
+    </div>
+  );
+}
+
 // ---------- Abas em pílula ----------
 export function Segmented<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: { id: T; label: string }[] }) {
   return (
@@ -124,11 +140,12 @@ export function Segmented<T extends string>({ value, onChange, options }: { valu
 }
 
 // Última barreira: se uma tela falhar ao desenhar, mostra um aviso com "Recarregar" em vez de deixar a tela em branco.
-export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
-  state = { failed: false };
-  static getDerivedStateFromError() { return { failed: true }; }
+export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean; stale: boolean }> {
+  state = { failed: false, stale: false };
+  static getDerivedStateFromError(error: unknown) { return { failed: true, stale: isStaleChunk(error) }; }
   componentDidCatch(error: unknown) {
     console.error(error);
+    if (isStaleChunk(error)) return; // versão nova publicada com a aba aberta: não é falha do app
     try { // avisa o servidor (sem dados do paciente): só mensagem curta e pilha
       const e = error as Error;
       navigator.sendBeacon('/api/client-error', new Blob([JSON.stringify({ message: String(e?.message ?? error).slice(0, 300), stack: String(e?.stack ?? '').slice(0, 1500), path: location.pathname })], { type: 'application/json' }));
@@ -136,12 +153,6 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: 
   }
   render() {
     if (!this.state.failed) return this.props.children;
-    return (
-      <div className="crash" role="alert">
-        <b>Algo deu errado nesta tela.</b>
-        <p className="muted">Seus dados estão salvos. Toque para recarregar.</p>
-        <button className="primary" onClick={() => location.reload()}>Recarregar</button>
-      </div>
-    );
+    return <StatusPage kind={this.state.stale ? 'update' : 'crash'} />;
   }
 }

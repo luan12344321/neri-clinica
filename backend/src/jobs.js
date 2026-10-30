@@ -125,6 +125,7 @@ async function sendWhatsApp(phone, text) {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify({ messaging_product: 'whatsapp', to, ...content }),
+    signal: AbortSignal.timeout(15_000), // a Meta travada não pode segurar o cron
   });
   if (!res.ok) throw new Error(`WhatsApp ${res.status}: ${(await res.text()).slice(0, 300)}`);
 }

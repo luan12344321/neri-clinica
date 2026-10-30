@@ -28,6 +28,7 @@ export const asaas = {
   findCustomer: async (ref) => (await call('GET', `/customers?externalReference=${encodeURIComponent(ref)}&limit=1`)).data?.[0] ?? null,
   createCustomer: (b) => call('POST', '/customers', b),
   createPayment: (b) => call('POST', '/payments', b),
+  getPayment: (id) => call('GET', `/payments/${encodeURIComponent(id)}`),
   pixQrCode: (id) => call('GET', `/payments/${encodeURIComponent(id)}/pixQrCode`),
   deletePayment: (id) => call('DELETE', `/payments/${encodeURIComponent(id)}`),
 };

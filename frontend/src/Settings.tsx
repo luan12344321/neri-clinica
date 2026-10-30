@@ -6,7 +6,7 @@ import { useLoad } from './hooks';
 import { DEFAULT_HOURS, fromMin, toMin, useHours, type Hours } from './hours';
 import { Icon } from './Icon';
 import { seenText, usePresence } from './Presence';
-import { Avatar, Empty, ListSkeleton, PageHead, ROLE_LABEL, Sheet, useInstall, useRole, useToast, type Role } from './ui';
+import { Avatar, ConfirmButton, Empty, ListSkeleton, PageHead, ROLE_LABEL, Sheet, useInstall, useRole, useToast, type Role } from './ui';
 
 export type Me = { name: string; email: string; role: Role; clinic: string; termsAccepted?: boolean };
 type Member = { id: string; name: string; email: string; role: Role; revoked: boolean };
@@ -26,6 +26,7 @@ export function Settings({ me }: { me: Me | null }) {
       <Account me={me} />
       {isManager && <HoursCard />}
       <InstallCard />
+      <GoogleCard />
       {isOwner && <Team />}
       {isOwner && <AssistantCard />}
       {isOwner && <PaymentsCard />}
@@ -33,6 +34,42 @@ export function Settings({ me }: { me: Me | null }) {
       <LegalLinks className="span-all" />
       <footer className="credit span-all"><span>Desenvolvido por</span><img src="/neri-logo.png" alt="NERI Design & Web" /></footer>
     </div>
+  );
+}
+
+// Google Agenda: antes ficava no Início; aqui é o lugar de configurar integrações.
+function GoogleCard() {
+  const st = useLoad<{ connected: boolean }>('/google/status');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true); setMsg('');
+    try { await fn(); } catch { setMsg('Não foi possível concluir. Tente novamente.'); } finally { setBusy(false); }
+  };
+  if (!st.data) return null;
+  return (
+    <section className="card">
+      <h2>Google Agenda</h2>
+      {st.data.connected ? (
+        <>
+          <p className="muted">Conectado. Agendamentos e alterações são sincronizados a cada 5 minutos.</p>
+          <div className="actions">
+            <button className="ghost" disabled={busy} onClick={() => run(async () => { await api('/google/sync', { method: 'POST', json: {} }); setMsg(`Sincronizado às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.`); })}>Sincronizar agora</button>
+            <ConfirmButton label="Desconectar" confirm="Confirmar desconexão" disabled={busy}
+              text="Os agendamentos param de ir para o Google Agenda. Nada é apagado aqui nem lá; você pode conectar de novo depois."
+              onConfirm={() => run(async () => { await api('/google', { method: 'DELETE' }); st.reload(); })} />
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="muted">Veja a agenda da clínica também no Google Agenda do seu celular.</p>
+          <div className="actions">
+            <button className="primary" disabled={busy} onClick={() => run(async () => { const r = await api<{ url: string }>('/google/connect', { method: 'POST', json: {} }); location.href = r.url; })}>Conectar Google Agenda</button>
+          </div>
+        </>
+      )}
+      {msg && <p className="muted" role="status">{msg}</p>}
+    </section>
   );
 }
 

@@ -234,3 +234,12 @@ test('chave da API vai só no cabeçalho do servidor e nunca na URL nem na respo
     assert.ok(!JSON.stringify(r.json).includes('x-goog'));
   } finally { globalThis.fetch = real; }
 });
+
+test('histórico da Julia fica cifrado no banco e ainda é reaproveitado (auditoria V-01)', async () => {
+  const r1 = await ask(A, fakeClient([text('Alergia a dipirona registrada no prontuário')]));
+  const rows = await t.sql('SELECT content::text c FROM sara_messages WHERE conversation_id=$1', [r1.conversationId]);
+  assert.ok(rows.length >= 2 && rows.every((r) => r.c.startsWith('"v1:') && !r.c.includes('dipirona')), 'nada em claro');
+  const c2 = fakeClient([text('ok')]);
+  await ask(A, c2, { conversationId: r1.conversationId });
+  assert.equal(c2.calls[0].contents[1].parts[0].text, 'Alergia a dipirona registrada no prontuário');
+});

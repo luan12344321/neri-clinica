@@ -4,10 +4,11 @@ import { api, ApiError } from './api';
 // O servidor responde com códigos em inglês ("Rate limit exceeded...", "internal error"); a tela mostra o motivo em português.
 // 'forbidden' segue como código: telas checam esse valor para explicar a falta de permissão.
 const loadErr = (e: unknown) =>
-  !(e instanceof ApiError) ? 'Sem conexão com o servidor. Confira a internet e tente de novo.'
+  !(e instanceof ApiError) ? (navigator.onLine ? 'Sem conexão com o servidor. Tente de novo em instantes.' : 'Você está sem internet. Confira a conexão e tente de novo.')
   : e.status === 403 ? e.message
   : e.status === 429 ? 'Muitas consultas seguidas. Aguarde alguns segundos e abra a tela de novo.'
-  : e.status >= 500 ? 'O servidor não respondeu. Tente de novo em instantes.'
+  : e.status === 404 || e.status === 410 ? 'Este item não existe mais. Ele pode ter sido removido por outra pessoa da equipe.'
+  : e.status >= 500 ?'O servidor não respondeu. Tente de novo em instantes.'
   : 'Não foi possível carregar estas informações.';
 
 // `path` nulo = não carrega. `every` (ms) recarrega periodicamente enquanto a aba está visível.
