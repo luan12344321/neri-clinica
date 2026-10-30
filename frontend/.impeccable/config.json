@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "marquee",
+        "value": "*",
+        "files": [
+          "frontend/index.html"
+        ],
+        "createdAt": "2026-10-30T17:18:48.829Z",
+        "reason": "agent: .boot-bar is an indeterminate loading indicator (no content scrolls), disabled under prefers-reduced-motion"
+      }
+    ]
+  }
+}
