@@ -206,6 +206,19 @@ ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_status_check;
 ALTER TABLE transactions ADD CONSTRAINT transactions_status_check CHECK (status IN ('pending','paid','canceled','refunded'));` });
 
 
+// Categorias financeiras padrão para a clínica que ainda não tem nenhuma (sem elas a tela "Nova conta" fica sem opção).
+// Só preenche clínica sem categoria: quem já cadastrou as suas não recebe nada a mais.
+const defaultCategories = (clinic) => `INSERT INTO categories (clinic_id, name, kind, dre_group)
+  SELECT c.id, d.name, d.kind, d.grp FROM clinics c
+  CROSS JOIN (VALUES ('Procedimentos','income','receita_bruta'), ('Outras receitas','income','receita_bruta'),
+    ('Insumos','expense','custos_variaveis'), ('Aluguel','expense','despesas_operacionais'),
+    ('Salários e pró-labore','expense','despesas_operacionais'), ('Marketing','expense','despesas_operacionais'),
+    ('Impostos sobre vendas','expense','deducoes'), ('Tarifas de pagamento','expense','despesas_financeiras')) AS d(name, kind, grp)
+  WHERE (${clinic}::uuid IS NULL OR c.id = ${clinic}::uuid) AND NOT EXISTS (SELECT 1 FROM categories x WHERE x.clinic_id = c.id)`;
+STEPS.push({ has: 'SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM clinics c WHERE NOT EXISTS (SELECT 1 FROM categories x WHERE x.clinic_id = c.id))',
+  sql: defaultCategories('NULL') });
+export const seedCategories = (clinicId) => q(defaultCategories('$1'), [clinicId]);
+
 let ready;
 export const ensureSchema = () => (ready ??= (async () => {
   for (const s of STEPS) if (!(await q(s.has)).length) await q(s.sql);

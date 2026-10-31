@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { q, pool } from './db.js';
 import { audit, auditCtx } from './audit.js';
-import { ensureSchema } from './schema.js';
+import { ensureSchema, seedCategories } from './schema.js';
 import { unknownVars, VARS } from './avisos.js';
 
 const money = z.number().nonnegative();
@@ -44,7 +44,10 @@ export default async function cadastros(app) {
   });
 
   // ---- Categorias financeiras ----
-  app.get('/categories', write, (req) => q('SELECT * FROM categories WHERE clinic_id=$1 ORDER BY name', [cid(req)]));
+  app.get('/categories', write, async (req) => {
+    await seedCategories(cid(req)); // clínica sem categorias (nova) recebe as padrão, senão "Nova conta" abre sem opção
+    return q('SELECT * FROM categories WHERE clinic_id=$1 ORDER BY name', [cid(req)]);
+  });
   app.post('/categories', write, async (req, reply) => {
     const b = z.object({ name: z.string().min(2).max(120), kind: z.enum(['income', 'expense']),
       dreGroup: z.enum(['receita_bruta', 'deducoes', 'custos_variaveis', 'despesas_operacionais', 'despesas_financeiras', 'impostos_lucro']) }).parse(req.body);
