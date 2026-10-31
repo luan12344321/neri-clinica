@@ -6,22 +6,22 @@ import { useLoad } from './hooks';
 import { Icon, type IconName } from './Icon';
 import { MfaCard, PrivacyCard } from './Privacidade';
 import { AssistantCard, GoogleCard, HoursCard, PaymentsCard, Team, WhatsAppCard, type Me } from './Settings';
-import { Empty, ListSkeleton, ROLE_LABEL, Segmented, useRole, useToast } from './ui';
+import { Empty, ListSkeleton, ROLE_LABEL, useRole, useToast } from './ui';
 
-// Painel Administrador: a configuração de cada parte do app num só lugar. Abas na horizontal (como o Início), um cartão de resumo por área
+// Painel Administrador: a configuração de cada parte do app num só lugar. Menu grande à esquerda (na horizontal em tela estreita), um cartão de resumo por área
 // e, em cada aba, as mesmas telas de configuração que já existem (nada duplicado): o que muda aqui muda nas telas de uso, e o inverso.
 type Tab = 'geral' | 'equipe' | 'agenda' | 'procedimentos' | 'estoque' | 'financeiro' | 'mensagens' | 'integracoes' | 'seguranca' | 'sistema';
-const TABS: { id: Tab; label: string; owner?: boolean }[] = [
-  { id: 'geral', label: 'Visão geral' },
-  { id: 'equipe', label: 'Equipe e acessos', owner: true },
-  { id: 'agenda', label: 'Agenda e horários' },
-  { id: 'procedimentos', label: 'Procedimentos' },
-  { id: 'estoque', label: 'Estoque e produtos' },
-  { id: 'financeiro', label: 'Financeiro' },
-  { id: 'mensagens', label: 'Mensagens' },
-  { id: 'integracoes', label: 'Integrações', owner: true },
-  { id: 'seguranca', label: 'Segurança e LGPD' },
-  { id: 'sistema', label: 'Sistema', owner: true },
+const TABS: { id: Tab; label: string; hint: string; icon: IconName; owner?: boolean }[] = [
+  { id: 'geral', label: 'Visão geral', hint: 'Resumo de tudo', icon: 'chart' },
+  { id: 'equipe', label: 'Equipe e acessos', hint: 'Usuários e permissões', icon: 'users', owner: true },
+  { id: 'agenda', label: 'Agenda e horários', hint: 'Dias e horas de atendimento', icon: 'calendar' },
+  { id: 'procedimentos', label: 'Procedimentos', hint: 'Catálogo e preços', icon: 'syringe' },
+  { id: 'estoque', label: 'Estoque e produtos', hint: 'Itens, mínimos e custos', icon: 'box' },
+  { id: 'financeiro', label: 'Financeiro', hint: 'Bancos e categorias', icon: 'bank' },
+  { id: 'mensagens', label: 'Mensagens', hint: 'Modelos e avisos', icon: 'mail' },
+  { id: 'integracoes', label: 'Integrações', hint: 'Pix, WhatsApp e Google', icon: 'spark', owner: true },
+  { id: 'seguranca', label: 'Segurança e LGPD', hint: 'Acesso e privacidade', icon: 'alert' },
+  { id: 'sistema', label: 'Sistema', hint: 'Estado e histórico', icon: 'pulse', owner: true },
 ];
 
 type Tile = { icon: IconName; label: string; value: string; caption: string; badge?: string; warn?: boolean; tab: Tab };
@@ -66,7 +66,15 @@ export function AdminPanel({ me }: { me: Me | null }) {
           ))}
         </div>
       </header>
-      <Segmented value={tab} onChange={setTab} options={tabs.map((t) => ({ id: t.id, label: t.label }))} />
+      <div className="admin-layout">
+      <nav className="admin-nav" role="tablist" aria-label="Áreas do painel" aria-orientation="vertical">
+        {tabs.map((t) => (
+          <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}>
+            <span className="admin-nav-ico" aria-hidden="true"><Icon name={t.icon} size={20} /></span>
+            <span className="admin-nav-txt"><b>{t.label}</b><small>{t.hint}</small></span>
+          </button>
+        ))}
+      </nav>
       <div className="admin-body">
         {tab === 'geral' && <Overview open={setTab} />}
         {tab === 'equipe' && isOwner && <><Team /><Permissions /></>}
@@ -80,6 +88,7 @@ export function AdminPanel({ me }: { me: Me | null }) {
         {tab === 'integracoes' && isOwner && <div className="dash settings"><PaymentsCard /><WhatsAppCard /><AssistantCard /><GoogleCard /></div>}
         {tab === 'seguranca' && <div className="dash settings"><MfaCard /><PrivacyCard /></div>}
         {tab === 'sistema' && isOwner && <System me={me} />}
+      </div>
       </div>
     </div>
   );
