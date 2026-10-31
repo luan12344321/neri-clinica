@@ -191,6 +191,9 @@ ALTER TABLE patients
   ADD COLUMN IF NOT EXISTS anonymized_at timestamptz;
 ` });
 
+// Endereço do paciente (dado pessoal: entra na exportação e na anonimização da LGPD). db/schema.sql já o traz em patients.
+STEPS.push({ has: col('patients', 'address'), sql: 'ALTER TABLE patients ADD COLUMN IF NOT EXISTS address text' });
+
 let ready;
 export const ensureSchema = () => (ready ??= (async () => {
   for (const s of STEPS) if (!(await q(s.has)).length) await q(s.sql);

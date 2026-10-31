@@ -32,6 +32,7 @@ CREATE TABLE patients (
   birth_date date,
   phone text,                              -- E.164
   email text,
+  address text,                            -- endereço (dado pessoal: exportado e anonimizado pela LGPD)
   cpf_enc text,                            -- dado sensível (LGPD): AES-256-GCM, ver backend/src/crypto.js
   cpf_hash text,                           -- HMAC do CPF: deduplica/busca sem guardar o CPF em claro
   marketing_consent boolean NOT NULL DEFAULT false,  -- base legal p/ mensagens

@@ -49,7 +49,7 @@ export default async function lgpd(app) {
   // ---- Exportação dos dados de UM titular (art. 18, II e V): tudo que o sistema guarda sobre a pessoa, em JSON ----
   app.get('/lgpd/patients/:id/export', { ...manager, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
     await ensureSchema();
-    const p = await find(req, reply, 'id, full_name, birth_date, phone, email, cpf_enc, marketing_consent, notes, created_at, legal_hold_reason, legal_hold_at, anonymized_at');
+    const p = await find(req, reply, 'id, full_name, birth_date, phone, email, address, cpf_enc, marketing_consent, notes, created_at, legal_hold_reason, legal_hold_at, anonymized_at');
     if (!p) return;
     const id = p.id, clinicId = cid(req);
     const phone = normalizePhone(p.phone);
@@ -75,7 +75,7 @@ export default async function lgpd(app) {
       exportedAt: new Date().toISOString(),
       note: 'Cópia dos dados pessoais deste titular guardados pelo sistema. Fotos de rótulo, PDFs de rastreabilidade (só metadados aqui) e a conversa interna com a Julia não entram. O IP e os registros de acesso de outras pessoas ficam fora.',
       patient: { id, fullName: p.full_name, birthDate: p.birth_date, phone: p.phone, email: p.email, cpf: p.cpf_enc ? decrypt(p.cpf_enc, cpfAad(id)) : null,
-        marketingConsent: p.marketing_consent, notes: p.notes, createdAt: p.created_at, legalHold: p.legal_hold_at ? { since: p.legal_hold_at, reason: p.legal_hold_reason } : null,
+        marketingConsent: p.marketing_consent, address: p.address, notes: p.notes, createdAt: p.created_at, legalHold: p.legal_hold_at ? { since: p.legal_hold_at, reason: p.legal_hold_reason } : null,
         anonymizedAt: p.anonymized_at },
       appointments, applications, transactions, returns, consents, messages,
       medicalRecords: records.map((r) => ({ id: r.id, author: r.author, createdAt: r.created_at, ...JSON.parse(decrypt(r.data_enc, recordAad(r.id))) })),
@@ -92,12 +92,13 @@ export default async function lgpd(app) {
       fullName: z.string().trim().min(2).max(120).optional(), birthDate: z.string().date().nullable().optional(),
       phone: z.string().nullable().optional().refine((v) => !v || normalizePhone(v), 'Telefone inválido'),
       email: z.string().email().nullable().optional(), notes: z.string().max(5000).nullable().optional(),
+      address: z.string().trim().max(300).nullable().optional(),
     }).refine((v) => Object.keys(v).length > 0, 'nada para alterar').parse(req.body);
     const p = await find(req, reply);
     if (!p) return;
     if (p.anonymized_at) return reply.code(409).send({ error: 'anonymized' });
     const sets = [], vals = [p.id, cid(req)];
-    for (const [k, col] of [['fullName', 'full_name'], ['birthDate', 'birth_date'], ['phone', 'phone'], ['email', 'email'], ['notes', 'notes']]) {
+    for (const [k, col] of [['fullName', 'full_name'], ['birthDate', 'birth_date'], ['phone', 'phone'], ['email', 'email'], ['address', 'address'], ['notes', 'notes']]) {
       if (b[k] === undefined) continue;
       if (k === 'fullName' && b[k] === null) continue;
       vals.push(b[k] ?? null); sets.push(`${col}=$${vals.length}`);
@@ -180,7 +181,7 @@ export default async function lgpd(app) {
       const { rows: [{ n }] } = await c.query(`SELECT count(*)::int n FROM appointments WHERE patient_id=$1 AND clinic_id=$2 AND status IN ('scheduled','confirmed') AND ends_at > now()`, [p.id, clinicId]);
       if (n) { await c.query('ROLLBACK'); return reply.code(409).send({ error: 'open appointments', count: n }); }
       const phones = phoneVariants(cur.phone);
-      await c.query(`UPDATE patients SET full_name=$3, birth_date=NULL, phone=NULL, email=NULL, cpf_enc=NULL, cpf_hash=NULL, notes=NULL,
+      await c.query(`UPDATE patients SET full_name=$3, birth_date=NULL, phone=NULL, email=NULL, address=NULL, cpf_enc=NULL, cpf_hash=NULL, notes=NULL,
                        marketing_consent=false, anonymized_at=now() WHERE id=$1 AND clinic_id=$2`, [p.id, clinicId, ANON_NAME]);
       // sem novos contatos: consentimentos revogados, mensagens pendentes canceladas, textos já enviados sem o nome, retornos encerrados
       await c.query(`INSERT INTO contact_consents (clinic_id, patient_id, purpose, granted, recorded_by) SELECT $1,$2,x,false,$3 FROM unnest(ARRAY['return','birthday','marketing']) x`, [clinicId, p.id, req.user.userId]);

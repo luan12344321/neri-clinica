@@ -13,7 +13,7 @@ export type Bank = {
   id: string; name: string; institution: string; kind: 'checking' | 'savings' | 'payment' | 'cash'; last4: string | null;
   isDefault: boolean; active: boolean; balance: number; openingBalance: number; pixKeyType: string | null; pixKeyMasked: string | null;
 };
-type Tx = { id: string; description: string; amount: string; due_date: string };
+type Tx = { id: string; description: string; amount: string; due_date: string; patient?: string | null; procedure?: string | null };
 type Recent = { id: string; type: 'income' | 'expense'; description: string; amount: number; status: 'pending' | 'paid'; due_date: string; paid_at: string | null; category: string | null; bank: string | null };
 
 const KIND: Record<Bank['kind'], string> = { checking: 'Conta corrente', savings: 'Poupança', payment: 'Conta de pagamento', cash: 'Caixa (dinheiro)' };
@@ -95,8 +95,10 @@ function Summary({ sum, flow, banks, recv, pay, bump, goTab }: { sum: ReturnType
       {s && (
         <>
           <section className="fin-cards">
-            <div className="fin"><span><Icon name="receive" size={16} />Receitas</span><strong>{mask(brl(s.income), hidden)}</strong></div>
-            <div className="fin"><span><Icon name="pay" size={16} />Despesas</span><strong>{mask(brl(s.expense), hidden)}</strong></div>
+            <div className="fin"><span><Icon name="receive" size={16} />Receitas</span><strong>{mask(brl(s.income), hidden)}</strong>
+              {s.incomeReceived != null && <small>{mask(`${brl(s.incomeReceived)} recebido · ${brl(s.incomePending)} a receber`, hidden)}</small>}</div>
+            <div className="fin"><span><Icon name="pay" size={16} />Despesas</span><strong>{mask(brl(s.expense), hidden)}</strong>
+              {s.expensePaid != null && <small>{mask(`${brl(s.expensePaid)} pago · ${brl(s.expensePending)} a pagar`, hidden)}</small>}</div>
             <div className="fin result"><span><Icon name="wallet" size={16} />Resultado do mês<EyeToggle className="on-dark" /></span><strong className={s.balance < 0 ? 'neg' : ''}>{mask(brl(s.balance), hidden)}</strong><small>Ticket médio {mask(brl(s.averageTicket), hidden)}</small></div>
           </section>
           {active.length > 0 && (
@@ -152,6 +154,7 @@ function Accounts({ recv, pay, banks, onChanged, goBanks, error }: { recv: Tx[] 
   const [settle, setSettle] = useState<{ tx: Tx; kind: 'in' | 'out' } | null>(null);
   const [pix, setPix] = useState<Tx | null>(null);
   const [adding, setAdding] = useState(false);
+  const [edit, setEdit] = useState<Tx | null>(null);
   const toast = useToast();
   const { hidden } = useHideValues();
   const today = dayISO();
@@ -165,10 +168,11 @@ function Accounts({ recv, pay, banks, onChanged, goBanks, error }: { recv: Tx[] 
             return (
               <li key={t.id} className="stack">
                 <div className="between">
-                  <div><b>{t.description}</b><div className="muted">vence {dateBR(t.due_date)} {late && <span className="pill warn">vencida</span>}</div></div>
+                  <div><b>{t.description}</b>{t.patient && <div>{t.patient}{t.procedure ? ` · ${t.procedure}` : ''}</div>}<div className="muted">vence {dateBR(t.due_date)} {late && <span className="pill warn">vencida</span>}</div></div>
                   <b className="amount">{mask(brl(Number(t.amount)), hidden)}</b>
                 </div>
                 <div className="actions">
+                  <button className="ghost sm" onClick={() => setEdit(t)} aria-label={`Editar ${t.description}`}>Editar</button>
                   {kind === 'in' && <button className="ghost sm" onClick={() => setPix(t)}><Icon name="qr" size={16} />Cobrar por Pix</button>}
                   <button className="primary sm" onClick={() => setSettle({ tx: t, kind })}>{kind === 'in' ? 'Receber' : 'Pagar'}</button>
                 </div>
@@ -188,8 +192,24 @@ function Accounts({ recv, pay, banks, onChanged, goBanks, error }: { recv: Tx[] 
       {settle && <SettleSheet tx={settle.tx} kind={settle.kind} banks={banks} goBanks={goBanks} onClose={() => setSettle(null)}
         onDone={() => { setSettle(null); onChanged(); toast(settle.kind === 'in' ? 'Recebimento registrado' : 'Pagamento registrado'); }} />}
       {pix && <PixSheet tx={pix} onClose={() => setPix(null)} onPaid={() => { onChanged(); toast('Pagamento recebido'); }} goBanks={() => { setPix(null); goBanks(); }} />}
-      {adding && <NewTransaction onClose={() => setAdding(false)} onDone={() => { setAdding(false); onChanged(); toast('Conta cadastrada'); }} />}
+      {adding && <NewTransaction banks={banks} onClose={() => setAdding(false)} onDone={() => { setAdding(false); onChanged(); toast('Conta cadastrada'); }} />}
+      {edit && <EditTransaction tx={edit} onClose={() => setEdit(null)} onDone={(msg) => { setEdit(null); onChanged(); toast(msg); }} />}
     </>
+  );
+}
+
+// Corrige uma conta ainda pendente ou a cancela (some dos totais e fica no histórico). O que já foi pago/recebido não se edita.
+function EditTransaction({ tx, onClose, onDone }: { tx: Tx; onClose: () => void; onDone: (msg: string) => void }) {
+  return (
+    <Sheet title="Editar conta" onClose={onClose}>
+      <AddForm label="Salvar alterações" fields={[
+        { name: 'description', label: 'Descrição', def: tx.description, required: true },
+        { name: 'amount', label: 'Valor (R$)', type: 'number', step: '0.01', def: String(Number(tx.amount)), required: true },
+        { name: 'dueDate', label: 'Vencimento', type: 'date', def: String(tx.due_date).slice(0, 10), required: true },
+      ]} onSubmit={async (v) => { await api(`/finance/transactions/${tx.id}`, { method: 'PATCH', json: v }); onDone('Conta atualizada'); }} />
+      <ConfirmButton label="Cancelar esta conta" confirm="Sim, cancelar" text="Ela sai de “a receber/a pagar” e dos totais. O registro fica no histórico como cancelado."
+        onConfirm={async () => { await api(`/finance/transactions/${tx.id}`, { method: 'DELETE' }); onDone('Conta cancelada'); }} />
+    </Sheet>
   );
 }
 
@@ -319,23 +339,32 @@ function PixSheet({ tx, onClose, onPaid, goBanks }: { tx: Tx; onClose: () => voi
   );
 }
 
-function NewTransaction({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+function NewTransaction({ banks, onClose, onDone }: { banks: Bank[]; onClose: () => void; onDone: () => void }) {
   const cats = useLoad<{ id: string; name: string; kind: 'income' | 'expense' }[]>('/categories');
   const fields: Field[] = [
     { name: 'categoryId', label: 'Categoria', type: 'select', required: true, options: cats.data?.map((c) => ({ value: c.id, label: `${c.kind === 'income' ? 'Receita' : 'Despesa'} · ${c.name}` })) },
     { name: 'description', label: 'Descrição', required: true },
     { name: 'amount', label: 'Valor (R$)', type: 'number', step: '0.01', required: true },
     { name: 'dueDate', label: 'Vencimento', type: 'date', def: dayISO(), required: true },
+    { name: 'paid', label: 'Já foi pago/recebido (entra direto no saldo da conta)', type: 'checkbox' },
+    { name: 'bankAccountId', label: 'Conta, se já foi pago (vazio = conta padrão)', type: 'select', options: banks.filter((b) => b.active).map((b) => ({ value: b.id, label: b.name })) },
   ];
   return (
     <Sheet title="Nova conta" onClose={onClose}>
       <AddForm label="Cadastrar" fields={fields} onSubmit={async (v) => {
         const kind = cats.data?.find((c) => c.id === v.categoryId)?.kind;
-        await api('/finance/transactions', { method: 'POST', json: { type: kind, categoryId: v.categoryId, description: v.description, amount: v.amount, competenceDate: v.dueDate, dueDate: v.dueDate } });
+        await api('/finance/transactions', { method: 'POST', json: { type: kind, categoryId: v.categoryId, description: v.description, amount: v.amount, competenceDate: v.dueDate, dueDate: v.dueDate,
+          paid: !!v.paid, ...(v.paid && v.bankAccountId ? { bankAccountId: v.bankAccountId } : {}) } });
         onDone();
       }} />
     </Sheet>
   );
+}
+
+// Contas bancárias fora da tela Financeiro (usado pelo painel Administrador).
+export function BanksPanel() {
+  const banks = useLoad<Bank[]>('/banks');
+  return <Banks banks={banks} onChanged={banks.reload} />;
 }
 
 // ---------- Bancos ----------

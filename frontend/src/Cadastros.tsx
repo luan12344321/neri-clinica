@@ -7,7 +7,7 @@ import { ConsentimentoPaciente } from './Consentimento';
 import { Icon } from './Icon';
 import { dayIntervals, fromMin, slotsOf, useHours } from './hours';
 import { RegraRetornoSheet } from './RegraRetorno';
-import { Avatar, Empty, ListSkeleton, PageHead, Sheet, useRole, useToast } from './ui';
+import { Avatar, ConfirmButton, Empty, ListSkeleton, PageHead, Sheet, useRole, useToast } from './ui';
 
 type Opt = { value: string; label: string };
 export type Field = { name: string; label: string; type?: 'text' | 'email' | 'password' | 'number' | 'date' | 'checkbox' | 'select' | 'textarea' | 'datetime-local' | 'tel';
@@ -132,7 +132,8 @@ const whenLabel = (d: Date) => `${ymd(d) === ymd(new Date()) ? 'hoje' : d.toLoca
 const SLOTS = Array.from({ length: 27 }, (_, i) => `${pad(7 + Math.floor(i / 2))}:${i % 2 ? '30' : '00'}`); // 07:00 às 20:00
 type Slot = { date: string; time: string };
 
-export function SlotPicker({ value, onChange, ignoreId }: { value: Slot; onChange: (v: Slot) => void; ignoreId?: string }) {
+// professionalId: com profissional escolhido, só os horários dele contam como ocupados (como no servidor); sem ele, qualquer atendimento ocupa.
+export function SlotPicker({ value, onChange, ignoreId, professionalId }: { value: Slot; onChange: (v: Slot) => void; ignoreId?: string; professionalId?: string }) {
   const { hours } = useHours();
   const [showAll, setShowAll] = useState(false); // encaixe fora do expediente
   const days = Array.from({ length: 14 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() + i); return d; });
@@ -152,7 +153,9 @@ export function SlotPicker({ value, onChange, ignoreId }: { value: Slot; onChang
   const groups = showAll ? [{ label: 'Qualquer horário', times: SLOTS }] : intervals.map(([s, e]) => ({ label: `${fromMin(s)} às ${fromMin(e)}`, times: slotsOf([[s, e]]) }));
   const taken = (time: string) => {
     const t0 = new Date(`${value.date}T${time}`).getTime();
-    return (day.data ?? []).some((a) => a.id !== ignoreId && !['canceled', 'no_show'].includes(a.status) && t0 >= new Date(a.starts_at).getTime() && t0 < new Date(a.ends_at).getTime());
+    return (day.data ?? []).some((a) => a.id !== ignoreId && !['canceled', 'no_show'].includes(a.status)
+      && (!professionalId || !a.professional_id || a.professional_id === professionalId)
+      && t0 >= new Date(a.starts_at).getTime() && t0 < new Date(a.ends_at).getTime());
   };
   const past = (time: string) => new Date(`${value.date}T${time}`).getTime() < Date.now();
   return (
@@ -196,6 +199,8 @@ export function AppointmentSheet({ onClose, onCreated }: { onClose: () => void; 
   const patientId = chosen?.id ?? '';
   const patientOpts = [...(chosen && !patients.data?.some((p) => p.id === chosen.id) ? [chosen] : []), ...(patients.data ?? [])];
   const [procedureId, setProcedureId] = useState('');
+  const pros = useList<{ id: string; name: string; role: string }[]>('/professionals');
+  const [professionalId, setProfessionalId] = useState('');
   const [slot, setSlot] = useState<Slot>({ date: ymd(new Date()), time: '' });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -208,7 +213,7 @@ export function AppointmentSheet({ onClose, onCreated }: { onClose: () => void; 
       const proc = procs.data?.find((p) => p.id === procedureId);
       const start = new Date(`${slot.date}T${slot.time}`);
       const end = new Date(start.getTime() + (proc?.duration_min ?? 60) * 60_000);
-      await api('/appointments', { method: 'POST', json: { patientId, procedureId: procedureId || undefined, startsAt: start.toISOString(), endsAt: end.toISOString() } });
+      await api('/appointments', { method: 'POST', json: { patientId, procedureId: procedureId || undefined, professionalId: professionalId || undefined, startsAt: start.toISOString(), endsAt: end.toISOString() } });
       onCreated(); toast('Agendamento criado');
     } catch (x) { setErr(errText(x)); } finally { setBusy(false); }
   }
@@ -231,7 +236,14 @@ export function AppointmentSheet({ onClose, onCreated }: { onClose: () => void; 
             {procs.data?.map((p) => <option key={p.id} value={p.id}>{p.name} — {brl(Number(p.default_price))}</option>)}
           </select>
         </label>
-        <div className="form-label">Dia e horário<SlotPicker value={slot} onChange={setSlot} /></div>
+        <label>Profissional
+          <select value={professionalId} onChange={(e) => { setProfessionalId(e.target.value); setSlot((s) => ({ ...s, time: '' })); }}>
+            <option value="">Qualquer profissional</option>
+            {pros.data?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          {!professionalId && <span className="muted">Sem profissional, qualquer atendimento no horário bloqueia a agenda inteira.</span>}
+        </label>
+        <div className="form-label">Dia e horário<SlotPicker value={slot} onChange={setSlot} professionalId={professionalId || undefined} /></div>
         {err && <p role="alert" className="err">{err}</p>}
         <button className="primary" disabled={busy}>{busy ? 'Salvando…' : 'Agendar'}</button>
       </form>
@@ -257,7 +269,7 @@ export function RescheduleSheet({ appt, onClose, onDone }: { appt: any; onClose:
   return (
     <Sheet title="Reagendar" onClose={onClose}>
       <p className="muted"><b>{appt.patient}</b> · {appt.procedure ?? 'Sem procedimento'} · {whenLabel(new Date(appt.starts_at))}</p>
-      <SlotPicker value={slot} onChange={setSlot} ignoreId={appt.id} />
+      <SlotPicker value={slot} onChange={setSlot} ignoreId={appt.id} professionalId={appt.professional_id ?? undefined} />
       {err && <p role="alert" className="err">{err}</p>}
       <button className="primary" disabled={busy} onClick={go}>{busy ? 'Salvando…' : 'Confirmar novo horário'}</button>
     </Sheet>
@@ -320,11 +332,23 @@ function Patients({ autoOpen = false, focus = null, onFinish }: { autoOpen?: boo
       </section>
       {adding && (
         <Sheet title="Novo paciente" onClose={() => setAdding(false)}>
-          <AddForm label="Salvar paciente" onSubmit={async (v) => { await api('/patients', { method: 'POST', json: v }); l.reload(); setAdding(false); toast('Paciente cadastrado'); }} fields={[
+          <AddForm label="Salvar paciente" onSubmit={async (v) => {
+            try { await api('/patients', { method: 'POST', json: v }); }
+            catch (x) {
+              // mesmo nome e telefone de um cadastro existente: a recepção decide se é outra pessoa
+              if (!(x instanceof ApiError && x.status === 409 && x.message.startsWith('Já existe um paciente'))) throw x;
+              if (!window.confirm(`${x.message}\n\nCadastrar mesmo assim?`)) throw x;
+              await api('/patients', { method: 'POST', json: { ...v, confirmDuplicate: true } });
+            }
+            l.reload(); setAdding(false); toast('Paciente cadastrado');
+          }} fields={[
             { name: 'fullName', label: 'Nome completo', required: true },
             { name: 'birthDate', label: 'Nascimento', type: 'date' },
             { name: 'phone', label: 'Telefone (com DDD)', type: 'tel', check: phoneCheck },
+            { name: 'email', label: 'E-mail (opcional)', type: 'email' },
+            { name: 'address', label: 'Endereço (opcional)' },
             { name: 'cpf', label: 'CPF (opcional)', numeric: true, check: cpfCheck },
+            { name: 'notes', label: 'Observações (opcional)', type: 'textarea' },
             { name: 'marketingConsent', label: 'Autoriza receber mensagens (aniversário, pós-procedimento)', type: 'checkbox' },
           ]} />
         </Sheet>
@@ -385,6 +409,9 @@ function PatientDetail({ id, onClose, session, onFinish }: { id: string; onClose
                   <dt>CPF</dt><dd>{p.data.cpf ? fmtCpf(p.data.cpf) : '—'}</dd>
                   <dt>Telefone</dt><dd>{p.data.phone ? fmtPhone(p.data.phone) : '—'}</dd>
                   <dt>Nascimento</dt><dd>{p.data.birth_date ? dateBR(p.data.birth_date) : '—'}</dd>
+                  <dt>E-mail</dt><dd>{p.data.email || '—'}</dd>
+                  <dt>Endereço</dt><dd>{p.data.address || '—'}</dd>
+                  {p.data.notes && <><dt>Observações</dt><dd>{p.data.notes}</dd></>}
                 </dl>
               </div>
               <p className="muted note">Dados sensíveis: cada acesso a esta ficha é registrado.</p>
@@ -404,7 +431,9 @@ function PatientDetail({ id, onClose, session, onFinish }: { id: string; onClose
                 { name: 'birthDate', label: 'Nascimento', type: 'date', def: p.data.birth_date?.slice(0, 10) ?? '' },
                 { name: 'phone', label: 'Telefone (com DDD)', type: 'tel', def: p.data.phone ?? '', check: phoneCheck },
                 { name: 'email', label: 'E-mail', type: 'email', def: p.data.email ?? '' },
-              ]} onSubmit={async (v) => { await api(`/patients/${id}`, { method: 'PATCH', json: { fullName: v.fullName, birthDate: v.birthDate ?? null, phone: v.phone ?? null, email: v.email ?? null } }); setEditing(false); p.reload(); toast('Dados corrigidos'); }} />
+                { name: 'address', label: 'Endereço', def: p.data.address ?? '' },
+                { name: 'notes', label: 'Observações', type: 'textarea', def: p.data.notes ?? '' },
+              ]} onSubmit={async (v) => { await api(`/patients/${id}`, { method: 'PATCH', json: { fullName: v.fullName, birthDate: v.birthDate ?? null, phone: v.phone ?? null, email: v.email ?? null, address: v.address ?? null, notes: v.notes ?? null } }); setEditing(false); p.reload(); toast('Dados corrigidos'); }} />
             </Sheet>
           )}
           {tab === 'autorizacoes' && p.data && <section className="card"><ConsentimentoPaciente patientId={id} /></section>}
@@ -441,6 +470,7 @@ function Procedures() {
   const l = useList<any[]>('/procedures');
   const [adding, setAdding] = useState(false);
   const [ruleFor, setRuleFor] = useState<{ id: string; name: string } | null>(null);
+  const [editing, setEditing] = useState<any | null>(null);
   const toast = useToast();
   return (
     <>
@@ -457,11 +487,23 @@ function Procedures() {
               <span className="grow"><b>{p.name}</b><span className="muted">{p.duration_min} min</span></span>
               <b className="amount">{brl(Number(p.default_price))}</b>
               {isClinical && <button className="ghost sm" style={{ minHeight: 44 }} onClick={() => setRuleFor({ id: p.id, name: p.name })} aria-label={`Regra de retorno de ${p.name}`}>Retorno</button>}
+              {isManager && <button className="ghost sm" style={{ minHeight: 44 }} onClick={() => setEditing(p)} aria-label={`Editar ${p.name}`}>Editar</button>}
             </div>
           </li>
         ))}</ul>
       </section>
       {ruleFor && <RegraRetornoSheet procedure={ruleFor} onClose={() => setRuleFor(null)} />}
+      {editing && (
+        <Sheet title={`Editar ${editing.name}`} onClose={() => setEditing(null)}>
+          <AddForm label="Salvar alterações" onSubmit={async (v) => { await api(`/procedures/${editing.id}`, { method: 'PATCH', json: v }); l.reload(); setEditing(null); toast('Procedimento atualizado'); }} fields={[
+            { name: 'name', label: 'Nome', def: editing.name, required: true },
+            { name: 'defaultPrice', label: 'Preço (R$)', type: 'number', step: '0.01', def: String(Number(editing.default_price)), required: true },
+            { name: 'durationMin', label: 'Duração (min)', type: 'number', def: String(editing.duration_min) },
+          ]} />
+          <ConfirmButton label="Desativar procedimento" confirm="Sim, desativar" text="Ele sai das listas de agendamento. Atendimentos já feitos mantêm o procedimento e o preço."
+            onConfirm={async () => { try { await api(`/procedures/${editing.id}`, { method: 'PATCH', json: { active: false } }); l.reload(); setEditing(null); toast('Procedimento desativado'); } catch (x) { toast(errText(x)); } }} />
+        </Sheet>
+      )}
       {adding && (
         <Sheet title="Novo procedimento" onClose={() => setAdding(false)}>
           <AddForm label="Salvar procedimento" onSubmit={async (v) => { await api('/procedures', { method: 'POST', json: v }); l.reload(); setAdding(false); toast('Procedimento salvo'); }} fields={[
@@ -479,6 +521,8 @@ function StockRow({ p, onDone }: { p: any; onDone: () => void }) {
   const [qty, setQty] = useState('');
   const [err, setErr] = useState('');
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const { isManager } = useRole();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   async function move(sign: 1 | -1, reason: 'purchase' | 'loss') {
@@ -501,7 +545,7 @@ function StockRow({ p, onDone }: { p: any; onDone: () => void }) {
         <span className={`pill ${low ? 'warn' : 'ok'}`}>{q} {p.unit}</span>
       </div>
       <div className={`meter${low ? ' low' : ''}`} role="img" aria-label={`${q} de ${target} ${p.unit}`}><div style={{ width: `${fill}%` }} /></div>
-      {!open ? <button className="link" onClick={() => setOpen(true)}>Movimentar estoque</button> : (
+      {!open ? <div className="between"><button className="link" onClick={() => setOpen(true)}>Movimentar estoque</button><button className="link" onClick={() => setEditing(true)} aria-label={`Editar ${p.name}`}>Editar</button></div> : (
         <div className="adjust">
           <input type="text" inputMode="decimal" placeholder="Quantidade" aria-label={`Quantidade de ${p.name}`} value={qty} onChange={(e) => setQty(e.target.value)} autoFocus />
           <button className="ghost sm" disabled={busy} onClick={() => move(1, 'purchase')}>Entrada</button>
@@ -509,6 +553,25 @@ function StockRow({ p, onDone }: { p: any; onDone: () => void }) {
         </div>
       )}
       {err && <p role="alert" className="err">{err}</p>}
+      {editing && (
+        <Sheet title={`Editar ${p.name}`} onClose={() => setEditing(false)}>
+          <p className="muted">O saldo muda só por entrada, perda ou consumo, para o histórico continuar fechando.</p>
+          <AddForm label="Salvar alterações" onSubmit={async (v) => {
+            const json: Record<string, unknown> = { ...v };
+            for (const k of ['category', 'manufacturer', 'expiresAt']) if (!(k in v)) json[k] = null; // campo esvaziado = limpar
+            await api(`/products/${p.id}`, { method: 'PATCH', json }); setEditing(false); onDone(); toast('Produto atualizado');
+          }} fields={[
+            { name: 'name', label: 'Nome', def: p.name, required: true },
+            { name: 'unit', label: 'Unidade', def: p.unit },
+            { name: 'minQuantity', label: 'Estoque mínimo', type: 'number', step: 'any', def: String(Number(p.min_quantity)), required: true },
+            { name: 'targetQuantity', label: 'Estoque alvo', type: 'number', step: 'any', def: String(Number(p.target_quantity)), required: true },
+            { name: 'category', label: 'Categoria', def: p.category ?? '' },
+            { name: 'manufacturer', label: 'Fornecedor ou fabricante', def: p.manufacturer ?? '' },
+            { name: 'expiresAt', label: 'Validade', type: 'date', def: p.expires_at ? String(p.expires_at).slice(0, 10) : '' },
+            ...(isManager ? [{ name: 'unitCost', label: 'Custo unitário (R$)', type: 'number' as const, step: '0.01', def: p.unit_cost != null ? String(Number(p.unit_cost)) : '' }] : []),
+          ]} />
+        </Sheet>
+      )}
     </li>
   );
 }
@@ -536,6 +599,10 @@ function Products() {
             { name: 'unit', label: 'Unidade', def: 'un' },
             { name: 'minQuantity', label: 'Estoque mínimo (avisar abaixo disso)', type: 'number', step: 'any', required: true },
             { name: 'targetQuantity', label: 'Estoque alvo (quanto ter após repor)', type: 'number', step: 'any', required: true },
+            { name: 'quantity', label: 'Quantidade em estoque agora', type: 'number', step: 'any', def: '0' },
+            { name: 'category', label: 'Categoria (opcional)' },
+            { name: 'manufacturer', label: 'Fornecedor ou fabricante (opcional)' },
+            { name: 'expiresAt', label: 'Validade (opcional)', type: 'date' },
             ...(isManager ? [{ name: 'unitCost', label: 'Custo unitário (R$)', type: 'number' as const, step: '0.01' }] : []), // custo é dado financeiro
           ]} />
         </Sheet>
@@ -567,6 +634,10 @@ function Messages() {
         ))}</ul>
       </section>
       <section className="card list-card">
+        <h2 className="sec">Avisos da agenda</h2>
+        <p className="muted pad">O paciente que autorizou recebe, sozinho: aviso ao <b>agendar</b>, ao <b>remarcar</b>, ao <b>cancelar</b> e um <b>lembrete no dia anterior</b> (das 9h às 19h). O lembrete usa o modelo “Lembrete” acima; sem ele, vai um texto padrão. Concluir o atendimento não envia nada.</p>
+      </section>
+      <section className="card list-card">
         <h2 className="sec">Regras pós-procedimento</h2>
         {auto.data && !auto.data.followupRules.length && <p className="muted pad">Nenhuma regra. Uma regra envia um modelo alguns dias após o atendimento.</p>}
         <ul className="rows">{auto.data?.followupRules.map((r) => (
@@ -576,7 +647,7 @@ function Messages() {
       </section>
       {adding === 'modelo' && (
         <Sheet title="Novo modelo de mensagem" onClose={() => setAdding(null)}>
-          <p className="muted">Use {'{{nome}}'} para o primeiro nome do paciente.</p>
+          <p className="muted">Variáveis: {'{{nome}}'} (primeiro nome). No lembrete também {'{{procedimento}}'}, {'{{data}}'} e {'{{hora}}'}. Outras variáveis não são aceitas.</p>
           <AddForm label="Salvar modelo" onSubmit={async (v) => { await api('/automation/templates', { method: 'POST', json: v }); auto.reload(); setAdding(null); toast('Modelo salvo'); }} fields={[
             { name: 'kind', label: 'Tipo', type: 'select', required: true, options: Object.entries(KIND).map(([value, label]) => ({ value, label })) },
             { name: 'body', label: 'Mensagem', type: 'textarea', required: true },

@@ -21,7 +21,7 @@ const HOUR = 56; // altura de uma hora, em px
 export const isLate = (a: { status: string; starts_at: string; ends_at?: string | null }, now = Date.now()) =>
   (a.status === 'scheduled' || a.status === 'confirmed') && new Date(a.ends_at ?? a.starts_at).getTime() < now;
 
-type Appt = { id: string; starts_at: string; ends_at?: string; status: string; patient: string; procedure: string | null; patient_id: string; birth_date?: string | null };
+type Appt = { id: string; starts_at: string; ends_at?: string; status: string; patient: string; procedure: string | null; patient_id: string; birth_date?: string | null; professional?: string | null };
 
 // Agenda de hoje: mostra SÓ o horário de atendimento da clínica, faixa por faixa (por padrão 08:00–11:00, depois
 // 13:00–18:00), uma logo abaixo da outra, sem o quadro do intervalo. Atendimentos fora dessas faixas não aparecem aqui
@@ -124,7 +124,7 @@ export function ApptSheet({ appt, clinical, busy, onClose, onStart, onChart, onC
         <div className="grow"><b>{appt.patient}</b><span className="muted">{[age !== null ? `${age} anos` : null, appt.procedure ?? 'Sem procedimento'].filter(Boolean).join(' · ')}</span></div>
         <span className={`pill ${appt.status === 'done' ? 'ok' : done || isLate(appt) ? 'warn' : ''}`}>{label}</span>
       </div>
-      <p className="muted"><Icon name="calendar" size={16} /> {clock(s)}{e ? ` às ${clock(e)}` : ''}</p>
+      <p className="muted"><Icon name="calendar" size={16} /> {clock(s)}{e ? ` às ${clock(e)}` : ''}{appt.professional ? ` · com ${appt.professional}` : ''}</p>
       <div className="actions col">
         {clinical && !done && <button className="primary" onClick={onStart}>Iniciar atendimento</button>}
         {clinical && <button className="ghost" onClick={onChart}>Ver prontuário</button>}

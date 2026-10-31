@@ -101,8 +101,10 @@ export default async function banks(app) {
     await ensureSchema();
     const { limit } = z.object({ limit: z.coerce.number().int().min(1).max(50).default(8) }).parse(req.query);
     return q(`SELECT t.id, t.type, t.description, t.amount::float AS amount, t.status, t.due_date, t.paid_at,
-                     c.name AS category, b.name AS bank
+                     c.name AS category, b.name AS bank, p.full_name AS patient
               FROM transactions t LEFT JOIN categories c ON c.id=t.category_id LEFT JOIN bank_accounts b ON b.id=t.bank_account_id
+              LEFT JOIN appointments a ON a.id=t.appointment_id AND a.clinic_id=t.clinic_id
+              LEFT JOIN patients p ON p.id=a.patient_id AND p.clinic_id=t.clinic_id
               WHERE t.clinic_id=$1 AND t.status<>'canceled' ORDER BY COALESCE(t.paid_at, t.created_at) DESC LIMIT $2`, [cid(req), limit]);
   });
 

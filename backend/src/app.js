@@ -9,6 +9,7 @@ import { q } from './db.js';
 import { audit } from './audit.js';
 import { ensureSchema } from './schema.js';
 import { suggestReturn } from './retornos.js';
+import { notify } from './avisos.js';
 import { askSara, aiFailure, pingSara, sealedHistory } from './sara.js';
 import googleRoutes, { pushAppointment } from './google.js';
 import { getDashboard, getFinanceSummary, getTopProcedures, getRestock, getCashFlow, buildDre } from './queries.js';
@@ -154,13 +155,20 @@ app.get('/dashboard', guard, async (req) => {
 app.get('/appointments', guard, async (req) => {
   const { from, to } = z.object({ from: z.string().date(), to: z.string().date() }).parse(req.query);
   // dias no fuso da clínica (comparar com a data pura usa o fuso do banco, UTC: o fim da noite caía no dia seguinte)
-  return q(`SELECT a.*, p.full_name AS patient, pr.name AS procedure
+  return q(`SELECT a.*, p.full_name AS patient, pr.name AS procedure, u.name AS professional
             FROM appointments a JOIN patients p ON p.id=a.patient_id AND p.clinic_id=a.clinic_id
             LEFT JOIN procedures pr ON pr.id=a.procedure_id AND pr.clinic_id=a.clinic_id
+            LEFT JOIN users u ON u.id=a.professional_id AND u.clinic_id=a.clinic_id
             JOIN clinics c ON c.id=a.clinic_id
             WHERE a.clinic_id=$1 AND (a.starts_at AT TIME ZONE c.timezone)::date BETWEEN $2::date AND $3::date
             ORDER BY a.starts_at`, [clinic(req), from, to]);
 });
+
+// Quem atende (dono, gerente e profissionais com acesso ativo): qualquer perfil escolhe o profissional ao agendar.
+// Só id, nome e perfil; e-mail e demais dados da equipe continuam restritos ao dono (GET /team).
+app.get('/professionals', guard, (req) =>
+  q(`SELECT id, name, role FROM users WHERE clinic_id=$1 AND password_hash <> '!' AND role IN ('owner','manager','professional')
+     ORDER BY (role='professional') DESC, name`, [clinic(req)]));
 
 const apptBody = z.object({
   patientId: z.guid(), procedureId: z.guid().optional(),
@@ -193,6 +201,7 @@ app.post('/appointments', guard, async (req, reply) => {
     return reply.code(missing ? 404 : 409).send({ error: missing ? `${missing} not found` : 'slot_taken' });
   }
   pushAppointment(row.id).catch((e) => req.log.error(e)); // se falhar, o cron de sync reenvia
+  notify(req.log, row.id, 'booked');
   return reply.code(201).send(row);
 });
 
@@ -218,6 +227,8 @@ app.patch('/appointments/:id', guard, async (req, reply) => {
     return reply.code(still ? 409 : 404).send({ error: still ? 'slot_taken' : 'not found or already closed' });
   }
   pushAppointment(row.id).catch((e) => req.log.error(e));
+  if (b.status === 'canceled') notify(req.log, row.id, 'canceled');
+  else if (b.startsAt) notify(req.log, row.id, 'rescheduled');
   return row;
 });
 
@@ -277,8 +288,13 @@ app.get('/finance/dre', manager, (req) => {
 });
 app.get('/finance/payables', manager, (req) =>
   q(`SELECT * FROM transactions WHERE clinic_id=$1 AND type='expense' AND status='pending' ORDER BY due_date`, [clinic(req)]));
+// Com o paciente e o procedimento do atendimento: sem isso várias cobranças aparecem iguais ("Atendimento") e não se sabe quem deve.
 app.get('/finance/receivables', manager, (req) =>
-  q(`SELECT * FROM transactions WHERE clinic_id=$1 AND type='income' AND status='pending' ORDER BY due_date`, [clinic(req)]));
+  q(`SELECT t.*, p.full_name AS patient, pr.name AS procedure
+     FROM transactions t LEFT JOIN appointments a ON a.id=t.appointment_id AND a.clinic_id=t.clinic_id
+     LEFT JOIN patients p ON p.id=a.patient_id AND p.clinic_id=t.clinic_id
+     LEFT JOIN procedures pr ON pr.id=a.procedure_id AND pr.clinic_id=t.clinic_id
+     WHERE t.clinic_id=$1 AND t.type='income' AND t.status='pending' ORDER BY t.due_date, t.created_at`, [clinic(req)]));
 // Dá baixa na conta (recebimento ou pagamento) e registra em qual conta bancária o dinheiro entrou/saiu:
 // a escolhida ou, se nenhuma for informada, a padrão da clínica.
 app.post('/finance/transactions/:id/pay', manager, async (req, reply) => {

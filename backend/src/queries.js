@@ -48,7 +48,14 @@ export const getTopProcedures = (clinicId, months) =>
 export async function getFinanceSummary(clinicId, monthStart) {
   const [r] = await q(
     `SELECT COALESCE(SUM(amount) FILTER (WHERE type='income'),0)::float AS income,
-            COALESCE(SUM(amount) FILTER (WHERE type='expense'),0)::float AS expense
+            COALESCE(SUM(amount) FILTER (WHERE type='expense'),0)::float AS expense,
+            -- recebido/pago × previsto (pendente): o total acima mistura os dois (regime de competência)
+            COALESCE(SUM(amount) FILTER (WHERE type='income' AND status='paid'),0)::float AS "incomeReceived",
+            COALESCE(SUM(amount) FILTER (WHERE type='income' AND status='pending'),0)::float AS "incomePending",
+            COALESCE(SUM(amount) FILTER (WHERE type='expense' AND status='paid'),0)::float AS "expensePaid",
+            COALESCE(SUM(amount) FILTER (WHERE type='expense' AND status='pending'),0)::float AS "expensePending",
+            -- só o que veio de atendimento: venda de produto e adiantamento não entram no ticket
+            COALESCE(SUM(amount) FILTER (WHERE type='income' AND appointment_id IS NOT NULL),0)::float AS "appointmentIncome"
      FROM transactions
      WHERE clinic_id=$1 AND status<>'canceled'
        AND competence_date >= $2::date AND competence_date < $2::date + interval '1 month'`, [clinicId, monthStart]);
@@ -56,8 +63,9 @@ export async function getFinanceSummary(clinicId, monthStart) {
     `SELECT COUNT(*)::int AS n FROM appointments
      WHERE clinic_id=$1 AND status='done' AND price IS NOT NULL
        AND completed_at >= $2::date AND completed_at < $2::date + interval '1 month'`, [clinicId, monthStart]);
-  return { ...r, balance: Math.round((r.income - r.expense) * 100) / 100, // float: sem isso sai -116.67000000000007
-           averageTicket: t.n ? +(r.income / t.n).toFixed(2) : 0, proceduresDone: t.n };
+  const { appointmentIncome, ...rest } = r;
+  return { ...rest, balance: Math.round((r.income - r.expense) * 100) / 100, // float: sem isso sai -116.67000000000007
+           averageTicket: t.n ? +(appointmentIncome / t.n).toFixed(2) : 0, proceduresDone: t.n };
 }
 
 // Fluxo de caixa (regime de caixa): o que entrou e saiu de fato (status 'paid') em cada um dos últimos meses.

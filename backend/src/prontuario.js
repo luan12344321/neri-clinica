@@ -25,18 +25,29 @@ export default async function prontuario(app) {
   const dupCpf = (e) => e.code === '23505'; // violação de unicidade (clinic_id, cpf_hash)
 
   app.post('/patients', base, async (req, reply) => {
+    await ensureSchema(); // garante a coluna address em bancos já em uso
     const b = z.object({ fullName: z.string().min(2).max(120), birthDate: z.string().date().optional(),
       // telefone que não vira número de WhatsApp seria salvo e o paciente nunca receberia o retorno
       phone: z.string().optional().refine((v) => !v || normalizePhone(v), 'Telefone inválido'), email: z.string().email().optional(), cpf: cpfSchema.optional(),
-      marketingConsent: z.boolean().default(false) }).parse(req.body);
+      address: z.string().trim().max(300).optional(), notes: z.string().trim().max(5000).optional(),
+      // a recepção confirma quando é outra pessoa com o mesmo nome e telefone
+      confirmDuplicate: z.boolean().default(false),
+      marketingConsent: z.boolean().default(false) }).strict().parse(req.body); // campo desconhecido é erro (antes era descartado em silêncio)
+    // Mesmo nome e mesmo telefone quase sempre é a mesma pessoa cadastrada duas vezes: avisa antes de duplicar a ficha.
+    if (b.phone && !b.confirmDuplicate) {
+      const [dup] = await q(
+        `SELECT id FROM patients WHERE clinic_id=$1 AND anonymized_at IS NULL AND lower(btrim(full_name))=lower(btrim($2))
+           AND regexp_replace(COALESCE(phone,''),'\\D','','g') = $3 LIMIT 1`, [cid(req), b.fullName, b.phone.replace(/\D/g, '')]);
+      if (dup) return reply.code(409).send({ error: 'Já existe um paciente com este nome e telefone. Se for outra pessoa, confirme o cadastro.', code: 'possible_duplicate', existingId: dup.id });
+    }
     const id = randomUUID(); // gerado aqui para poder amarrar o CPF cifrado a este id
     try {
       const [row] = await q(
-        `INSERT INTO patients (id,clinic_id,full_name,birth_date,phone,email,marketing_consent,cpf_enc,cpf_hash)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (clinic_id, cpf_hash) WHERE cpf_hash IS NOT NULL DO NOTHING
+        `INSERT INTO patients (id,clinic_id,full_name,birth_date,phone,email,marketing_consent,cpf_enc,cpf_hash,address,notes)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (clinic_id, cpf_hash) WHERE cpf_hash IS NOT NULL DO NOTHING
          RETURNING id, full_name`,
         [id, cid(req), b.fullName, b.birthDate ?? null, b.phone ?? null, b.email ?? null, b.marketingConsent,
-         b.cpf ? encrypt(b.cpf, cpfAad(id)) : null, b.cpf ? blindIndex(`cpf:${cid(req)}`, b.cpf) : null]);
+         b.cpf ? encrypt(b.cpf, cpfAad(id)) : null, b.cpf ? blindIndex(`cpf:${cid(req)}`, b.cpf) : null, b.address ?? null, b.notes ?? null]);
       if (!row) return reply.code(409).send({ error: 'CPF já cadastrado nesta clínica' });
       await audit(auditCtx(req), 'patient.create', 'patient', id);
       return reply.code(201).send(row);
@@ -70,7 +81,7 @@ export default async function prontuario(app) {
   // Ficha do paciente com CPF em claro: acesso clínico + auditado.
   app.get('/patients/:id', clinical, async (req, reply) => {
     const { id } = z.object({ id: z.guid() }).parse(req.params);
-    const [p] = await q(`SELECT id, full_name, birth_date, phone, email, marketing_consent, notes, cpf_enc
+    const [p] = await q(`SELECT id, full_name, birth_date, phone, email, address, marketing_consent, notes, cpf_enc
                          FROM patients WHERE id=$1 AND clinic_id=$2`, [id, cid(req)]);
     if (!p) return reply.code(404).send({ error: 'not found' });
     const cpf = p.cpf_enc ? decrypt(p.cpf_enc, cpfAad(id)) : null;

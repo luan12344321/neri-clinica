@@ -129,6 +129,13 @@ export default async function atendimento(app) {
             `UPDATE product_lots SET quantity_units = quantity_units - $3 WHERE id=$1 AND clinic_id=$2 AND quantity_units >= $3`,
             [lot.id, clinicId, l.units]);
           if (!rowCount) throw new Rule(409, 'insufficient_stock', { lot: lot.lot_code, product: p.name });
+        } else {
+          // Sem lote o saldo vale o do produto (em embalagens). Sem esta conferência o atendimento fechava consumindo estoque
+          // que não existe: o saldo era travado em 0 e o histórico gravava a saída inteira, e os dois deixavam de bater.
+          const need = round2(l.units / Number(p.units_per_package));
+          const { rowCount } = await c.query(
+            'SELECT 1 FROM products WHERE id=$1 AND clinic_id=$2 AND quantity >= $3 FOR UPDATE', [p.id, clinicId, need]);
+          if (!rowCount) throw new Rule(409, 'insufficient_stock', { product: p.name });
         }
         // custo da aplicação: custo da embalagem ÷ unidades por embalagem (frasco fracionado rende várias pacientes)
         const { rows: [ap] } = await c.query(

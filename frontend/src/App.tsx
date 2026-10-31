@@ -22,8 +22,9 @@ import { BottomNav, InstallPill, QuickSheet, Splash, type QuickAction } from './
 const AgendaView = lazy(() => import('./AgendaView').then((m) => ({ default: m.AgendaView })));
 const Settings = lazy(() => import('./Settings').then((m) => ({ default: m.Settings })));
 const Finance = lazy(() => import('./Finance').then((m) => ({ default: m.Finance })));
+const AdminPanel = lazy(() => import('./Admin').then((m) => ({ default: m.AdminPanel })));
 
-type View = 'inicio' | 'agenda' | 'financeiro' | 'estoque' | 'sara' | 'pacientes' | 'procedimentos' | 'produtos' | 'mensagens' | 'whatsapp' | 'config';
+type View = 'inicio' | 'agenda' | 'financeiro' | 'estoque' | 'sara' | 'pacientes' | 'procedimentos' | 'produtos' | 'mensagens' | 'whatsapp' | 'config' | 'admin';
 
 const NAV: { group: string; items: { id: View; label: string; icon: IconName; mgr?: boolean; front?: boolean }[] }[] = [
   { group: 'Principal', items: [
@@ -41,7 +42,7 @@ const NAV: { group: string; items: { id: View; label: string; icon: IconName; mg
     { id: 'procedimentos', label: 'Procedimentos', icon: 'syringe' },
   ] },
   { group: 'Comunicação', items: [{ id: 'mensagens', label: 'Mensagens', icon: 'mail', mgr: true }] },
-  { group: 'Conta', items: [{ id: 'config', label: 'Configurações', icon: 'gear' }] },
+  { group: 'Conta', items: [{ id: 'admin', label: 'Administrador', icon: 'grid', mgr: true }, { id: 'config', label: 'Configurações', icon: 'gear' }] },
   { group: 'Atendimento', items: [{ id: 'whatsapp', label: 'WhatsApp', icon: 'whatsapp', front: true }] },
 ];
 const NAV_ITEMS = NAV.flatMap((g) => g.items);
@@ -198,6 +199,7 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
         {view === 'inicio' && <Today key={fresh} name={me?.name} restock={restock.data ?? []} go={go} money={isManager} onBook={() => setBooking(true)} onPatient={() => { go('pacientes'); setAutoPatient(true); }}
           onStart={openPatient} />}
         {view === 'config' && <Settings me={me} />}
+        {view === 'admin' && <AdminPanel me={me} />}
         {view === 'agenda' && <Agenda key={fresh} onStart={openPatient} />}
         {view === 'financeiro' && <Finance initialTab={finTab} onTab={setFinTab} />}
         {view === 'estoque' && <Stock go={go} />}

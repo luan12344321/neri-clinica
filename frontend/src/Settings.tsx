@@ -41,7 +41,7 @@ export function Settings({ me }: { me: Me | null }) {
 }
 
 // Google Agenda: antes ficava no Início; aqui é o lugar de configurar integrações.
-function GoogleCard() {
+export function GoogleCard() {
   const st = useLoad<{ connected: boolean }>('/google/status');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -129,7 +129,7 @@ function InstallCard() {
   );
 }
 
-function Team() {
+export function Team() {
   const list = useLoad<Member[]>('/team');
   const presence = usePresence(true);
   const seen = (id: string) => presence.data?.find((p) => p.id === id);
@@ -205,7 +205,7 @@ function EditMember({ m, onClose, onDone }: { m: Member; onClose: () => void; on
   );
 }
 
-function AssistantCard() {
+export function AssistantCard() {
   const [state, setState] = useState<'idle' | 'busy' | 'ok' | 'down' | 'error'>('idle');
   async function test() {
     setState('busy');
@@ -225,7 +225,7 @@ function AssistantCard() {
 }
 
 // Conexão com o Asaas (confirmação automática de Pix). As chaves ficam nas variáveis da Vercel, nunca nesta tela.
-function PaymentsCard() {
+export function PaymentsCard() {
   const integ = useLoad<{ asaas: { configured: boolean; sandbox: boolean } }>('/integrations');
   const [state, setState] = useState<'idle' | 'busy' | 'ok' | 'fail'>('idle');
   const [detail, setDetail] = useState('');
@@ -264,7 +264,7 @@ type WaConfig = { enabled: boolean; number: string; phoneId: string; tokenSet: b
 type WaWaiting = { contact: string; name: string | null; reason: string | null; last_message: string | null };
 const maskPhone = (p: string) => (p.length > 4 ? `…${p.slice(-4)}` : p);
 
-function WhatsAppCard() {
+export function WhatsAppCard() {
   const cfg = useLoad<WaConfig>('/integrations/whatsapp');
   const waiting = useLoad<WaWaiting[]>('/integrations/whatsapp/waiting', 30000);
   const toast = useToast();
@@ -356,7 +356,7 @@ const TIMES = Array.from({ length: 48 }, (_, i) => fromMin(i * 30));
 const validDay = (f: [string, string][]) => f.every(([s, e], i) => toMin(e) > toMin(s) && (i === 0 || toMin(s) >= toMin(f[i - 1]![1])));
 const clone = (h: Hours): Hours => JSON.parse(JSON.stringify(h));
 
-function HoursCard() {
+export function HoursCard() {
   const { hours, loaded, isDefault, reload } = useHours();
   const [draft, setDraft] = useState<Hours | null>(null);
   const [busy, setBusy] = useState(false);

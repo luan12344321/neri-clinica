@@ -92,7 +92,7 @@ test('outbox: reserva travada há muito tempo é reenviada; reserva recente não
 test('tick: às 10h em São Paulo roda tudo, na ordem certa, e é idempotente', async () => {
   const at10 = new Date('2030-03-15T13:00:00Z'); // 10:00 em São Paulo
   const first = await tasks_tick(at10);
-  assert.deepEqual(Object.keys(first), ['birthday', 'returnsTick', 'stock', 'dre', 'outbox', 'googleSync']);
+  assert.deepEqual(Object.keys(first), ['birthday', 'reminder', 'returnsTick', 'stock', 'dre', 'outbox', 'googleSync']);
   assert.ok(Object.values(first).every((v) => v === 'ok'), JSON.stringify(first));
   const sent = (await t.sql(`SELECT count(*)::int n FROM message_queue`))[0].n;
   await tasks_tick(at10);
