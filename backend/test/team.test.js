@@ -36,11 +36,11 @@ test('funcionário não vê dinheiro nem a equipe: financeiro, Julia e /team dã
   assert.ok((await t.call('GET', '/dashboard', { token: owner })).json.revenueByMonth.length > 0, 'o dono continua vendo a receita');
 });
 
-test('cadastro valida e-mail duplicado, senha curta e papel (não cria outro dono)', async () => {
+test('cadastro valida e-mail duplicado, senha curta e papel desconhecido', async () => {
   assert.equal((await hire()).status, 201);
   const bad = (body) => t.call('POST', '/team', { token: owner, body: { name: 'Zé', email: 'ze@demo.test', password: PW, role: 'reception', ...body } });
   assert.equal((await bad({ password: 'curta' })).status, 400);
-  assert.equal((await bad({ role: 'owner' })).status, 400);
+  assert.equal((await bad({ role: 'superuser' })).status, 400);
   assert.equal((await bad({ email: 'sem-arroba' })).status, 400);
   assert.equal((await hire()).status, 409); // por último: o PGlite de teste derruba a conexão após um erro de SQL
 });
@@ -106,4 +106,15 @@ test('rota /sara/chat: sem crédito responde 503 ai_unavailable (não 500) e nã
     assert.deepEqual(r.json, { error: 'ai_unavailable' });
     assert.equal((await t.call('POST', '/sara/test', { token: owner })).status, 503);
   } finally { globalThis.fetch = real; }
+});
+
+test('o proprietário pode cadastrar outro proprietário; gerente não cadastra ninguém', async () => {
+  const novo = await t.call('POST', '/team', { token: owner, body: { name: 'Sócio Teste', email: 'socio@demo.test', password: PW, role: 'owner' } });
+  assert.equal(novo.status, 201); assert.equal(novo.json.role, 'owner');
+  const socio = await login('socio@demo.test');
+  assert.equal(socio.status, 200);
+  assert.equal((await t.call('GET', '/team', { token: socio.json.token })).status, 200, 'o novo dono gerencia a equipe');
+  await t.call('POST', '/team', { token: owner, body: { name: 'Gerente Teste', email: 'ger@demo.test', password: PW, role: 'manager' } });
+  const ger = await login('ger@demo.test');
+  assert.equal((await t.call('POST', '/team', { token: ger.json.token, body: { name: 'Xis Ypsilon', email: 'xy@demo.test', password: PW, role: 'owner' } })).status, 403);
 });

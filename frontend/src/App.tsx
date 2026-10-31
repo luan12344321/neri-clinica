@@ -26,7 +26,7 @@ const AdminPanel = lazy(() => import('./Admin').then((m) => ({ default: m.AdminP
 
 type View = 'inicio' | 'agenda' | 'financeiro' | 'estoque' | 'sara' | 'pacientes' | 'procedimentos' | 'produtos' | 'mensagens' | 'whatsapp' | 'config' | 'admin';
 
-const NAV: { group: string; items: { id: View; label: string; icon: IconName; mgr?: boolean; front?: boolean }[] }[] = [
+const NAV: { group: string; items: { id: View; label: string; icon: IconName; mgr?: boolean; front?: boolean; hidden?: boolean }[] }[] = [
   { group: 'Principal', items: [
     { id: 'inicio', label: 'Início', icon: 'home' },
     { id: 'agenda', label: 'Agenda', icon: 'calendar' },
@@ -42,7 +42,7 @@ const NAV: { group: string; items: { id: View; label: string; icon: IconName; mg
     { id: 'procedimentos', label: 'Procedimentos', icon: 'syringe' },
   ] },
   { group: 'Comunicação', items: [{ id: 'mensagens', label: 'Mensagens', icon: 'mail', mgr: true }] },
-  { group: 'Conta', items: [{ id: 'admin', label: 'Administrador', icon: 'grid', mgr: true }, { id: 'config', label: 'Configurações', icon: 'gear' }] },
+  { group: 'Conta', items: [{ id: 'admin', label: 'Administrador', icon: 'grid', mgr: true }, { id: 'config', label: 'Minha conta', icon: 'gear', hidden: true }] }, // config: só pelo avatar (quem não é gerente)
   { group: 'Atendimento', items: [{ id: 'whatsapp', label: 'WhatsApp', icon: 'whatsapp', front: true }] },
 ];
 const NAV_ITEMS = NAV.flatMap((g) => g.items);
@@ -123,12 +123,13 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
   }, [open]);
 
   const [finTab, setFinTab] = useState<FinTab>('resumo');
+  const [adminStart, setAdminStart] = useState<'conta' | undefined>();
   const [autoPatient, setAutoPatient] = useState(false);
   const [focus, setFocus] = useState<Focus | null>(null); // paciente (e atendimento) aberto a partir do Início
   const [quick, setQuick] = useState(false);
   const [booking, setBooking] = useState(false);
   const [fresh, setFresh] = useState(0); // muda quando algo é criado, para as telas recarregarem
-  const go = (v: View, tab?: FinTab) => { if (tab) setFinTab(tab); setAutoPatient(false); setFocus(null); setLost(false); setView(v); setOpen(false); scrollTo({ top: 0 }); };
+  const go = (v: View, tab?: FinTab) => { setAdminStart(undefined); if (tab) setFinTab(tab); setAutoPatient(false); setFocus(null); setLost(false); setView(v); setOpen(false); scrollTo({ top: 0 }); };
   const quickActions: QuickAction[] = [
     { icon: 'calendar', title: 'Agendar atendimento', hint: 'Escolha o dia e o horário', run: () => setBooking(true) },
     { icon: 'users', title: 'Cadastrar paciente', hint: 'Novo cadastro', run: () => { go('pacientes'); setAutoPatient(true); } },
@@ -190,7 +191,7 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
           <button className="icon-btn" aria-label={nAlerts ? `${nAlerts} alertas de estoque` : 'Sem alertas'} onClick={() => go('estoque')}>
             <Icon name="bell" />{nAlerts > 0 && <span className="dot">{nAlerts}</span>}
           </button>
-          <button className="avatar" aria-label="Configurações da conta" onClick={() => go('config')}>{initials(me?.name)}</button>
+          <button className="avatar" aria-label="Minha conta" onClick={() => { go(isManager ? 'admin' : 'config'); if (isManager) setAdminStart('conta'); }}>{initials(me?.name)}</button>
         </div>
       </header>
 
@@ -199,7 +200,7 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
         {view === 'inicio' && <Today key={fresh} name={me?.name} restock={restock.data ?? []} go={go} money={isManager} onBook={() => setBooking(true)} onPatient={() => { go('pacientes'); setAutoPatient(true); }}
           onStart={openPatient} />}
         {view === 'config' && <Settings me={me} />}
-        {view === 'admin' && <AdminPanel me={me} />}
+        {view === 'admin' && <AdminPanel me={me} start={adminStart} />}
         {view === 'agenda' && <Agenda key={fresh} onStart={openPatient} />}
         {view === 'financeiro' && <Finance initialTab={finTab} onTab={setFinTab} />}
         {view === 'estoque' && <Stock go={go} />}
@@ -223,7 +224,7 @@ function ShellInner({ onLogout, me }: { onLogout: () => void; me: Me | null }) {
               <div className="drawer-title"><img src="/neri-n.png" alt="" /><div><strong>Clínica</strong><span>{me?.clinic ?? 'Gestão'}</span></div></div>
               <button className="icon-btn on-dark close-btn" aria-label="Fechar menu" onClick={() => { setOpen(false); menuBtn.current?.focus(); }}><Icon name="close" /></button>
             </div>
-            {NAV.map((g) => ({ ...g, items: g.items.filter((i) => (!i.mgr || isManager) && (!i.front || hasWa)) })).filter((g) => g.items.length).map((g) => (
+            {NAV.map((g) => ({ ...g, items: g.items.filter((i) => !i.hidden && (!i.mgr || isManager) && (!i.front || hasWa)) })).filter((g) => g.items.length).map((g) => (
               <div key={g.group} className="nav-group">
                 <p>{g.group}</p>
                 {g.items.map((i) => (

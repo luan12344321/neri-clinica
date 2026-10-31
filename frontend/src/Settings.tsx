@@ -18,22 +18,19 @@ const ROLE_HINT: Record<Exclude<Role, 'owner'>, string> = {
   reception: 'Agenda, cadastro de pacientes, estoque e reposição (entradas, perdas e novos produtos) e a Julia. Sem acesso a financeiro, custos, mensagens, CPF, prontuário e equipe.',
 };
 const ROLE_OPTIONS = (Object.keys(ROLE_HINT) as (keyof typeof ROLE_HINT)[]).map((value) => ({ value, label: ROLE_LABEL[value] }));
+// Quem cadastra pode também criar outro proprietário (acesso total). Depois de criado, o perfil dele não se edita nem se remove por aqui.
+const NEW_ROLE_OPTIONS = [{ value: 'owner', label: `${ROLE_LABEL.owner} (acesso total)` }, ...ROLE_OPTIONS];
 
-export function Settings({ me }: { me: Me | null }) {
-  const { isOwner, isManager } = useRole();
+// Só o que é pessoal (senha, aplicativo, termos): vale para qualquer perfil e abre pelo avatar. Gerente e proprietário têm o mesmo
+// conteúdo na aba "Minha conta" do Administrador, junto com todas as configurações da clínica.
+export function Settings({ me }: { me: Me | null }) { return <MyAccount me={me} />; }
+
+export function MyAccount({ me }: { me: Me | null }) {
   return (
     <div className="dash settings">
-      <div className="span-all"><PageHead title="Configurações" hint={me?.clinic} /></div>
+      <div className="span-all"><PageHead title="Minha conta" hint={me?.clinic} /></div>
       <Account me={me} />
-      {isManager && <MfaCard />}
-      {isManager && <HoursCard />}
       <InstallCard />
-      <GoogleCard />
-      {isOwner && <Team />}
-      {isOwner && <AssistantCard />}
-      {isOwner && <PaymentsCard />}
-      {isOwner && <WhatsAppCard />}
-      {isManager && <PrivacyCard />}
       <LegalLinks className="span-all" />
       <footer className="credit span-all"><span>Desenvolvido por</span><img src="/neri-logo.png" alt="NERI Design & Web" /></footer>
     </div>
@@ -76,7 +73,7 @@ export function GoogleCard() {
   );
 }
 
-function Account({ me }: { me: Me | null }) {
+export function Account({ me }: { me: Me | null }) {
   const [open, setOpen] = useState(false);
   const toast = useToast();
   if (!me) return <section className="card"><ListSkeleton rows={1} /></section>;
@@ -106,7 +103,7 @@ function Account({ me }: { me: Me | null }) {
   );
 }
 
-function InstallCard() {
+export function InstallCard() {
   const { installed, canPrompt, ios, install } = useInstall();
   return (
     <section className="card install">
@@ -139,7 +136,7 @@ export function Team() {
   const fields: Field[] = [
     { name: 'name', label: 'Nome', required: true },
     { name: 'email', label: 'E-mail (será o login)', type: 'email', required: true },
-    { name: 'role', label: 'Perfil', type: 'select', required: true, options: ROLE_OPTIONS },
+    { name: 'role', label: 'Perfil', type: 'select', required: true, options: NEW_ROLE_OPTIONS },
     { name: 'password', label: 'Senha inicial (mínimo 10 caracteres)', type: 'password', required: true },
   ];
   return (

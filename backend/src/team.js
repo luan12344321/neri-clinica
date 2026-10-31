@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { q } from './db.js';
 import { audit, auditCtx } from './audit.js';
 
-// Equipe da clínica. Só o dono cria, edita e remove usuários; há um único dono (papel 'owner' não é atribuível aqui).
+// Equipe da clínica. Só um proprietário cria, edita e remove usuários. Outro proprietário só pode ser criado (não é editado nem removido
+// depois: o papel 'owner' fica fora do PATCH/DELETE, então ninguém tira o acesso de um dono por aqui).
 const ROLES = ['manager', 'professional', 'reception'];
 const password = z.string().min(10, 'A senha precisa ter pelo menos 10 caracteres').max(200);
 // '!' nunca é um hash bcrypt válido: usuário com esse valor não entra e seu token deixa de valer (ver app.auth).
@@ -23,7 +24,7 @@ export default async function team(app) {
 
   app.post('/team', owner, async (req, reply) => {
     const b = z.object({ name: z.string().trim().min(2).max(120), email: z.string().email(),
-      password, role: z.enum(ROLES) }).parse(req.body);
+      password, role: z.enum(['owner', ...ROLES]) }).parse(req.body);
     try {
       const [u] = await q(`INSERT INTO users (clinic_id, name, email, password_hash, role) VALUES ($1,$2,$3,$4,$5) RETURNING ${COLS}`,
         [cid(req), b.name, b.email.toLowerCase(), await bcrypt.hash(b.password, 10), b.role]);

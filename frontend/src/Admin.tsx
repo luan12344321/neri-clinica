@@ -5,12 +5,13 @@ import { BanksPanel } from './Finance';
 import { useLoad } from './hooks';
 import { Icon, type IconName } from './Icon';
 import { MfaCard, PrivacyCard } from './Privacidade';
-import { AssistantCard, GoogleCard, HoursCard, PaymentsCard, Team, WhatsAppCard, type Me } from './Settings';
+import { LegalLinks } from './Legal';
+import { Account, AssistantCard, GoogleCard, HoursCard, InstallCard, PaymentsCard, Team, WhatsAppCard, type Me } from './Settings';
 import { Empty, ListSkeleton, ROLE_LABEL, useRole, useToast } from './ui';
 
 // Painel Administrador: a configuração de cada parte do app num só lugar. Menu grande à esquerda (na horizontal em tela estreita), um cartão de resumo por área
 // e, em cada aba, as mesmas telas de configuração que já existem (nada duplicado): o que muda aqui muda nas telas de uso, e o inverso.
-type Tab = 'geral' | 'equipe' | 'agenda' | 'procedimentos' | 'estoque' | 'financeiro' | 'mensagens' | 'integracoes' | 'seguranca' | 'sistema';
+type Tab = 'geral' | 'equipe' | 'agenda' | 'procedimentos' | 'estoque' | 'financeiro' | 'mensagens' | 'integracoes' | 'seguranca' | 'sistema' | 'conta';
 const TABS: { id: Tab; label: string; hint: string; icon: IconName; owner?: boolean }[] = [
   { id: 'geral', label: 'Visão geral', hint: 'Resumo de tudo', icon: 'chart' },
   { id: 'equipe', label: 'Equipe e acessos', hint: 'Usuários e permissões', icon: 'users', owner: true },
@@ -22,6 +23,7 @@ const TABS: { id: Tab; label: string; hint: string; icon: IconName; owner?: bool
   { id: 'integracoes', label: 'Integrações', hint: 'Pix, WhatsApp e Google', icon: 'spark', owner: true },
   { id: 'seguranca', label: 'Segurança e LGPD', hint: 'Acesso e privacidade', icon: 'alert' },
   { id: 'sistema', label: 'Sistema', hint: 'Estado e histórico', icon: 'pulse', owner: true },
+  { id: 'conta', label: 'Minha conta', hint: 'Senha e aplicativo no celular', icon: 'gear' },
 ];
 
 type Tile = { icon: IconName; label: string; value: string; caption: string; badge?: string; warn?: boolean; tab: Tab };
@@ -41,10 +43,10 @@ function TileCard({ t, open }: { t: Tile; open: (tab: Tab) => void }) {
   );
 }
 
-export function AdminPanel({ me }: { me: Me | null }) {
+export function AdminPanel({ me, start }: { me: Me | null; start?: Tab }) {
   const { isOwner } = useRole();
   const tabs = TABS.filter((t) => isOwner || !t.owner);
-  const [tab, setTab] = useState<Tab>('geral');
+  const [tab, setTab] = useState<Tab>(start ?? 'geral');
   const first = me?.name?.split(/\s+/)[0];
   const shortcuts: { icon: IconName; label: string; tab: Tab; owner?: boolean }[] = [
     { icon: 'users', label: 'Novo usuário', tab: 'equipe', owner: true },
@@ -88,6 +90,7 @@ export function AdminPanel({ me }: { me: Me | null }) {
         {tab === 'integracoes' && isOwner && <div className="dash settings"><PaymentsCard /><WhatsAppCard /><AssistantCard /><GoogleCard /></div>}
         {tab === 'seguranca' && <div className="dash settings"><MfaCard /><PrivacyCard /></div>}
         {tab === 'sistema' && isOwner && <System me={me} />}
+        {tab === 'conta' && <div className="dash settings"><Account me={me} /><InstallCard /><LegalLinks className="span-all" /></div>}
       </div>
       </div>
     </div>
