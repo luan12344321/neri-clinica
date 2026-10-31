@@ -18,3 +18,6 @@ frontend/Video/
 
 # Banco local do dev:local (PGlite): nunca vai para o Git
 backend/.pglite-data/
+
+# Relatorios de QA pre-producao (locais; descrevem falhas de seguranca)
+.qa/

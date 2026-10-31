@@ -399,3 +399,29 @@ CREATE TABLE IF NOT EXISTS ai_record_usage (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS ai_record_usage_clinic ON ai_record_usage (clinic_id, created_at);
+
+-- ===== Rodada final: Julia (persistência), MFA (TOTP) e governança de dados (LGPD) =====
+ALTER TABLE sara_messages ADD COLUMN IF NOT EXISTS client_msg_id uuid;   -- id do envio no navegador: reenvio da mesma mensagem não duplica
+CREATE UNIQUE INDEX IF NOT EXISTS sara_messages_client_msg ON sara_messages (conversation_id, client_msg_id) WHERE client_msg_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS sara_messages_user_latest ON sara_messages (clinic_id, user_id, id DESC);
+
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS totp_secret_enc text,         -- segredo TOTP cifrado (AES-256-GCM, AAD users.totp:<id>)
+  ADD COLUMN IF NOT EXISTS totp_enabled_at timestamptz,  -- NULL = MFA desligado (segredo pendente de confirmação, se houver)
+  ADD COLUMN IF NOT EXISTS totp_last_step bigint,        -- último intervalo de 30 s aceito: um código não vale duas vezes
+  ADD COLUMN IF NOT EXISTS mfa_fails int NOT NULL DEFAULT 0,   -- tentativas de 2º fator na janela atual (trava em 5)
+  ADD COLUMN IF NOT EXISTS mfa_fail_at timestamptz;            -- início da janela de 15 min
+CREATE TABLE IF NOT EXISTS mfa_recovery_codes (
+  id bigserial PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES users ON DELETE CASCADE,
+  code_hash text NOT NULL,                              -- HMAC do código: o código em si só aparece uma vez, na ativação
+  used_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS mfa_recovery_user ON mfa_recovery_codes (user_id);
+
+ALTER TABLE clinics ADD COLUMN IF NOT EXISTS retention_years int CHECK (retention_years IS NULL OR retention_years > 0); -- NULL = ainda não decidido
+ALTER TABLE patients
+  ADD COLUMN IF NOT EXISTS legal_hold_reason text,       -- preenchido = retenção legal: nada é anonimizado
+  ADD COLUMN IF NOT EXISTS legal_hold_at timestamptz,
+  ADD COLUMN IF NOT EXISTS anonymized_at timestamptz;

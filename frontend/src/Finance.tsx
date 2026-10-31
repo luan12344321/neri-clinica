@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import qrcode from 'qrcode-generator';
 import { Cell, Pie, PieChart, ResponsiveContainer, Bar, BarChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts';
-import { ApiError, api, brl, monthLabel, thisMonth } from './api';
+import { ApiError, api, brl, dayISO, monthLabel, thisMonth } from './api';
 import { AddForm, errText, type Field } from './Cadastros';
 import { useLoad } from './hooks';
 import PainelCiclo from './PainelCiclo';
@@ -20,7 +20,6 @@ const KIND: Record<Bank['kind'], string> = { checking: 'Conta corrente', savings
 const INSTITUTIONS = ['Nubank', 'Itaú', 'Bradesco', 'Banco do Brasil', 'Caixa', 'Santander', 'Inter', 'C6 Bank', 'Sicoob', 'Sicredi', 'Mercado Pago', 'PagBank', 'Stone', 'Cora', 'Dinheiro', 'Outro'];
 const PIX_TYPES = [{ value: 'cpf', label: 'CPF' }, { value: 'cnpj', label: 'CNPJ' }, { value: 'email', label: 'E-mail' }, { value: 'phone', label: 'Celular' }, { value: 'random', label: 'Chave aleatória' }];
 const dateBR = (d: string) => new Date(`${String(d).slice(0, 10)}T12:00`).toLocaleDateString('pt-BR');
-const todayISO = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' }); // não UTC: depois das 21h seria amanhã
 
 const Status = ({ error, loading }: { error: string; loading: boolean }) =>
   error ? <p role="alert" className="err">{error}</p> : loading ? <ListSkeleton rows={3} /> : null;
@@ -85,7 +84,7 @@ function Summary({ sum, flow, banks, recv, pay, bump, goTab }: { sum: ReturnType
   const { hidden } = useHideValues();
   const s = sum.data;
   const total = (items: Tx[] | null) => (items ?? []).reduce((a, t) => a + Number(t.amount), 0);
-  const overdue = (recv ?? []).filter((t) => String(t.due_date).slice(0, 10) < todayISO());
+  const overdue = (recv ?? []).filter((t) => String(t.due_date).slice(0, 10) < dayISO());
   const active = (banks ?? []).filter((b) => b.active);
   const quick = (icon: IconName, label: string, hint: string, value: number, tone = '') => (
     <li><span className={`q-ico ${tone}`}><Icon name={icon} size={20} /></span><div><b>{label}</b><div className="muted">{hint}</div></div><strong className={tone === 'bad' ? 'neg' : ''}>{mask(brl(value), hidden)}</strong></li>
@@ -155,11 +154,11 @@ function Accounts({ recv, pay, banks, onChanged, goBanks, error }: { recv: Tx[] 
   const [adding, setAdding] = useState(false);
   const toast = useToast();
   const { hidden } = useHideValues();
-  const today = todayISO();
+  const today = dayISO();
   const list = (title: string, items: Tx[] | null, kind: 'in' | 'out') => (
     <section className="card">
       <h2>{title}</h2>
-      {!items ? <ListSkeleton rows={2} /> : items.length === 0 ? <Empty icon="check" title="Nada pendente" /> : (
+      {!items ? (error ? null : <ListSkeleton rows={2} />) : items.length === 0 ? <Empty icon="check" title="Nada pendente" /> : (
         <ul className="rows">
           {items.map((t) => {
             const late = String(t.due_date).slice(0, 10) < today;
@@ -236,9 +235,9 @@ function PixSheet({ tx, onClose, onPaid, goBanks }: { tx: Tx; onClose: () => voi
 
   const loadStatic = () => {
     setState('loading'); setProblem('');
-    api<{ payload?: string; amount: number; bank: string; keyMasked: string }>(`/finance/transactions/${tx.id}/pix`)
-      .then((r) => { if (r?.payload) { setData({ ...r, payload: r.payload, provider: 'static' }); setState('ready'); } else setState('error'); })
-      .catch((e) => setState(e instanceof ApiError && e.status === 409 ? 'nokey' : 'error'));
+    api<{ payload?: string; amount: number; bank: string; keyMasked: string; available?: false }>(`/finance/transactions/${tx.id}/pix`)
+      .then((r) => { if (r?.payload) { setData({ ...r, payload: r.payload, provider: 'static' }); setState('ready'); } else setState(r?.available === false ? 'nokey' : 'error'); })
+      .catch(() => setState('error'));
   };
   useEffect(() => {
     let off = false;
@@ -291,7 +290,7 @@ function PixSheet({ tx, onClose, onPaid, goBanks }: { tx: Tx; onClose: () => voi
       {state === 'paid' && <div className="paid-ok" role="status"><span><Icon name="check" size={30} /></span><b>Pagamento recebido!</b><p className="muted">A conta foi baixada automaticamente.</p></div>}
       {state === 'nokey' && (
         <>
-          <p className="muted">{problem || 'Para gerar o Pix, cadastre a chave Pix de uma conta em Bancos.'}</p>
+          <p className="muted">{problem || 'Nenhuma conta da clínica tem chave Pix cadastrada. Em Bancos, abra a conta que recebe os pagamentos e informe a chave Pix; depois volte aqui para gerar o código.'}</p>
           {problem ? <button className="primary" onClick={loadStatic}>Usar Pix estático (sem confirmação automática)</button> : <button className="primary" onClick={goBanks}>Ir para Bancos</button>}
         </>
       )}
@@ -326,7 +325,7 @@ function NewTransaction({ onClose, onDone }: { onClose: () => void; onDone: () =
     { name: 'categoryId', label: 'Categoria', type: 'select', required: true, options: cats.data?.map((c) => ({ value: c.id, label: `${c.kind === 'income' ? 'Receita' : 'Despesa'} · ${c.name}` })) },
     { name: 'description', label: 'Descrição', required: true },
     { name: 'amount', label: 'Valor (R$)', type: 'number', step: '0.01', required: true },
-    { name: 'dueDate', label: 'Vencimento', type: 'date', def: todayISO(), required: true },
+    { name: 'dueDate', label: 'Vencimento', type: 'date', def: dayISO(), required: true },
   ];
   return (
     <Sheet title="Nova conta" onClose={onClose}>
@@ -440,7 +439,7 @@ function Dre({ dre }: { dre: ReturnType<typeof useLoad<any>> }) {
   const { hidden } = useHideValues();
   const r = dre.data;
   const line = (label: string, v: number, strong = false) => (
-    <tr className={strong ? 'strong' : ''}><td>{label}</td><td className={v < 0 ? 'neg' : ''}>{mask(brl(v), hidden)}</td></tr>
+    <tr className={strong ? 'strong' : ''}><td>{label}</td><td className={v < 0 ? 'neg' : ''}>{mask(brl(v || 0), hidden)}</td>{/* -0 virava "-R$ 0,00" */}</tr>
   );
   const parts = r ? [
     { name: 'Deduções', value: r.deducoes }, { name: 'Custos variáveis', value: r.custosVariaveis }, { name: 'Despesas operacionais', value: r.despesasOperacionais },
@@ -460,7 +459,7 @@ function Dre({ dre }: { dre: ReturnType<typeof useLoad<any>> }) {
                     <PieChart><Pie data={parts} dataKey="value" nameKey="name" innerRadius="66%" outerRadius="100%" cornerRadius={8} paddingAngle={parts.length > 1 ? 4 : 0} stroke="none" isAnimationActive={false}>
                       {parts.map((p, i) => <Cell key={p.name} fill={`var(--c${(i % 6) + 1})`} />)}</Pie></PieChart>
                   </ResponsiveContainer>
-                  <div className="donut-total"><strong>{mask(brl(sum), hidden).replace('R$ ', '')}</strong><span>em saídas</span></div>
+                  <div className="donut-total"><strong>{mask(brl(sum), hidden).replace(/R\$\s/, '')}</strong><span>em saídas</span></div>
                 </div>
                 <ul className="legend">{parts.map((p, i) => (
                   <li key={p.name}><i style={{ background: `var(--c${(i % 6) + 1})` }} /><span>{p.name}</span><b>{Math.round((p.value / sum) * 100)}%</b></li>

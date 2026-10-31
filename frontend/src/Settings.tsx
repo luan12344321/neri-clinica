@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { LegalLinks } from './Legal';
-import { ApiError, api } from './api';
+import { ApiError, api, setToken } from './api';
 import { AddForm, errText, type Field } from './Cadastros';
 import { useLoad } from './hooks';
 import { DEFAULT_HOURS, fromMin, toMin, useHours, type Hours } from './hours';
 import { Icon } from './Icon';
 import { seenText, usePresence } from './Presence';
+import { MfaCard, PrivacyCard, ResetMfaButton } from './Privacidade';
 import { Avatar, ConfirmButton, Empty, ListSkeleton, PageHead, ROLE_LABEL, Sheet, useInstall, useRole, useToast, type Role } from './ui';
 
 export type Me = { name: string; email: string; role: Role; clinic: string; termsAccepted?: boolean };
@@ -24,6 +25,7 @@ export function Settings({ me }: { me: Me | null }) {
     <div className="dash settings">
       <div className="span-all"><PageHead title="Configurações" hint={me?.clinic} /></div>
       <Account me={me} />
+      {isManager && <MfaCard />}
       {isManager && <HoursCard />}
       <InstallCard />
       <GoogleCard />
@@ -31,6 +33,7 @@ export function Settings({ me }: { me: Me | null }) {
       {isOwner && <AssistantCard />}
       {isOwner && <PaymentsCard />}
       {isOwner && <WhatsAppCard />}
+      {isManager && <PrivacyCard />}
       <LegalLinks className="span-all" />
       <footer className="credit span-all"><span>Desenvolvido por</span><img src="/neri-logo.png" alt="NERI Design & Web" /></footer>
     </div>
@@ -91,7 +94,12 @@ function Account({ me }: { me: Me | null }) {
           <AddForm label="Salvar nova senha" fields={[
             { name: 'current', label: 'Senha atual', type: 'password', required: true },
             { name: 'next', label: 'Nova senha (mínimo 10 caracteres)', type: 'password', required: true },
-          ]} onSubmit={async (v) => { await api('/me/password', { method: 'POST', json: v }); setOpen(false); toast('Senha alterada'); }} />
+          ]} onSubmit={async (v) => {
+            // trocar a senha encerra as outras sessões; o servidor devolve um token novo para esta continuar entrada
+            const r = await api<{ token?: string }>('/me/password', { method: 'POST', json: v });
+            if (r.token) setToken(r.token);
+            setOpen(false); toast('Senha alterada');
+          }} />
         </Sheet>
       )}
     </section>
@@ -181,12 +189,13 @@ function EditMember({ m, onClose, onDone }: { m: Member; onClose: () => void; on
         { name: 'role', label: 'Perfil', type: 'select', def: m.role, options: ROLE_OPTIONS },
         { name: 'password', label: m.revoked ? 'Nova senha (mínimo 10 caracteres)' : 'Redefinir senha (deixe em branco para manter)', type: 'password', required: m.revoked },
       ]} onSubmit={async (v) => { await api(`/team/${m.id}`, { method: 'PATCH', json: v }); onDone(m.revoked && v.password ? 'Acesso reativado' : 'Alterações salvas'); }} />
+      {!m.revoked && m.role === 'manager' && <div className="danger-zone"><ResetMfaButton memberId={m.id} onDone={onDone} /></div>}
       {!m.revoked && (
         <div className="danger-zone">
           {!confirm ? <button className="ghost danger" onClick={() => setConfirm(true)}>Remover acesso</button> : (
             <>
               <p className="muted">{m.name} deixa de entrar no sistema agora. O histórico é mantido e você pode reativar depois redefinindo a senha.</p>
-              <div className="actions"><button className="ghost danger" onClick={revoke}>Confirmar remoção</button><button className="ghost" onClick={() => setConfirm(false)}>Cancelar</button></div>
+              <div className="actions"><button className="ghost danger" onClick={revoke}>Confirmar remoção</button><button className="ghost" onClick={() => setConfirm(false)}>Voltar</button></div>
             </>
           )}
           {err && <p role="alert" className="err">{err}</p>}

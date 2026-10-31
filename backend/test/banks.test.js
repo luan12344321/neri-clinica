@@ -83,10 +83,13 @@ test('pagar uma despesa na conta escolhida reduz o saldo dela', async () => {
   assert.equal((await t.call('GET', '/banks', { token: owner })).json[0].balance, 700);
 });
 
-test('Pix de uma conta a receber: payload com o valor, na chave da conta; 409 sem chave; 404 se já paga', async () => {
+test('Pix de uma conta a receber: payload com o valor, na chave da conta; sem chave é estado (200, available:false), não 409; 404 se já paga', async () => {
   const tx = await pending();
   await bank(); // sem chave Pix
-  assert.equal((await t.call('GET', `/finance/transactions/${tx.id}/pix`, { token: owner })).status, 409);
+  const none = await t.call('GET', `/finance/transactions/${tx.id}/pix`, { token: owner });
+  assert.deepEqual([none.status, none.json], [200, { available: false, reason: 'no_pix_key' }]);
+  assert.equal((await t.call('GET', `/finance/transactions/${tx.id}/pix`, { token: await t.tokenFor('recepcao@demo.test') })).status, 403, 'só dono/gerente');
+  assert.equal((await t.call('GET', `/finance/transactions/${tx.id}/pix`, { token: await t.tokenFor('b@demo.test') })).status, 404, 'outra clínica');
   await bank({ name: 'Inter', institution: 'Inter', pixKeyType: 'email', pixKey: 'pix@clinica.com', isDefault: true });
   const r = await t.call('GET', `/finance/transactions/${tx.id}/pix`, { token: owner });
   assert.equal(r.status, 200);

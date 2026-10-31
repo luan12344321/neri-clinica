@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
@@ -8,7 +8,8 @@ import { z } from 'zod';
 import { q } from './db.js';
 import { audit } from './audit.js';
 import { ensureSchema } from './schema.js';
-import { askSara, aiFailure, pingSara } from './sara.js';
+import { suggestReturn } from './retornos.js';
+import { askSara, aiFailure, pingSara, sealedHistory } from './sara.js';
 import googleRoutes, { pushAppointment } from './google.js';
 import { getDashboard, getFinanceSummary, getTopProcedures, getRestock, getCashFlow, buildDre } from './queries.js';
 
@@ -27,8 +28,17 @@ const app = Fastify({
 });
 // Em produção o app e a API são da mesma origem (/api), então CORS fica desligado, salvo lista explícita.
 await app.register(cors, { origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : false });
-if (!isTest) await app.register(rateLimit, { max: 120, timeWindow: '1 minute' });
 await app.register(jwt, { secret: process.env.JWT_SECRET });
+// Cota por usuário logado (a equipe atrás do mesmo Wi-Fi/NAT não divide os 120/min); sem token válido, por IP.
+// A assinatura é conferida (só decodificar deixaria forjar a chave); revogação e senha ficam com app.auth.
+export const rateKey = (req) => {
+  const h = req.headers.authorization;
+  if (h?.startsWith('Bearer ')) {
+    try { const p = app.jwt.verify(h.slice(7)); if (p.userId && p.clinicId) return `u:${p.userId}`; } catch { /* inválido: cai no IP */ }
+  }
+  return req.ip;
+};
+if (!isTest) await app.register(rateLimit, { max: 120, timeWindow: '1 minute', keyGenerator: rateKey });
 
 app.setErrorHandler((err, req, reply) => {
   if (err instanceof z.ZodError) return reply.code(400).send({ error: 'validation', issues: err.issues });
@@ -38,11 +48,16 @@ app.setErrorHandler((err, req, reply) => {
   reply.code(500).send({ error: 'internal' });
 });
 
+// O token leva uma marca da senha atual (HMAC do hash): trocar ou redefinir a senha derruba as sessões abertas com a antiga.
+const passwordMark = (hash) => createHmac('sha256', process.env.JWT_SECRET).update(String(hash)).digest('base64url').slice(0, 22);
+app.decorate('signSession', (u) =>
+  app.jwt.sign({ userId: u.id, clinicId: u.clinic_id, role: u.role, pv: passwordMark(u.password_hash) }, { expiresIn: '12h' }));
+
 app.decorate('auth', async (req, reply) => {
   try { await req.jwtVerify(); } catch { return reply.code(401).send({ error: 'unauthorized' }); }
   if (!req.user.clinicId) return reply.code(401).send({ error: 'unauthorized' }); // ex.: token de `state` do OAuth não autentica
-  const [u] = await q(`SELECT role FROM users WHERE id=$1 AND clinic_id=$2 AND password_hash <> '!'`, [req.user.userId, req.user.clinicId]);
-  if (!u) return reply.code(401).send({ error: 'unauthorized' });
+  const [u] = await q(`SELECT role, password_hash FROM users WHERE id=$1 AND clinic_id=$2 AND password_hash <> '!'`, [req.user.userId, req.user.clinicId]);
+  if (!u || req.user.pv !== passwordMark(u.password_hash)) return reply.code(401).send({ error: 'unauthorized' });
   req.user.role = u.role;
 });
 const guard = { onRequest: [app.auth] };
@@ -57,6 +72,8 @@ const owner = { onRequest: [app.auth, async (req, reply) => {
 await app.register((await import('./cadastros.js')).default);
 await app.register(googleRoutes);
 await app.register((await import('./team.js')).default);
+await app.register((await import('./mfa.js')).default);
+await app.register((await import('./lgpd.js')).default);
 await app.register((await import('./presence.js')).default);
 await app.register((await import('./banks.js')).default);
 await app.register((await import('./payments.js')).default);
@@ -74,7 +91,8 @@ const clinic = (req) => req.user.clinicId;
 // ---------- Auth ----------
 app.post('/auth/login', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
   const { email, password } = z.object({ email: z.string().email(), password: z.string() }).parse(req.body);
-  const [u] = await q('SELECT id, clinic_id, role, password_hash FROM users WHERE email=$1', [email.toLowerCase()]);
+  await ensureSchema();
+  const [u] = await q('SELECT id, clinic_id, role, password_hash, totp_enabled_at FROM users WHERE email=$1', [email.toLowerCase()]);
   // Limite de tentativas no banco (o rate limit em memória não vale entre invocações serverless):
   // 5 falhas em 15 min para o mesmo usuário vindas do mesmo IP bloqueiam esse IP, sem trancar o dono da conta.
   if (u) {
@@ -88,8 +106,10 @@ app.post('/auth/login', { config: { rateLimit: { max: 10, timeWindow: '1 minute'
     if (u) await audit({ clinicId: u.clinic_id, userId: u.id, ip: req.ip }, 'auth.login_failed', 'user', u.id);
     return reply.code(401).send({ error: 'invalid credentials' });
   }
+  // Com verificação em duas etapas ligada a senha sozinha não abre a sessão: devolve um token provisório (sem clínica, só serve em /auth/mfa).
+  if (u.totp_enabled_at) return { mfaRequired: true, mfaToken: app.jwt.sign({ userId: u.id, purpose: 'mfa' }, { expiresIn: '5m' }) };
   await audit({ clinicId: u.clinic_id, userId: u.id, ip: req.ip }, 'auth.login', 'user', u.id);
-  return { token: app.jwt.sign({ userId: u.id, clinicId: u.clinic_id, role: u.role }, { expiresIn: '12h' }) };
+  return { token: app.signSession(u) };
 });
 
 // Versão dos Termos de Uso / Política de Privacidade (mesma de frontend/src/Legal.tsx). Mudou? Todos aceitam de novo.
@@ -117,9 +137,11 @@ app.post('/me/password', { ...guard, config: { rateLimit: { max: 5, timeWindow: 
   const { current, next } = z.object({ current: z.string(), next: z.string().min(10).max(200) }).parse(req.body);
   const [u] = await q('SELECT password_hash FROM users WHERE id=$1', [req.user.userId]);
   if (!(await bcrypt.compare(current, u.password_hash))) return reply.code(403).send({ error: 'wrong password' });
-  await q('UPDATE users SET password_hash=$1 WHERE id=$2', [await bcrypt.hash(next, 10), req.user.userId]);
+  const [nu] = await q('UPDATE users SET password_hash=$1 WHERE id=$2 RETURNING id, clinic_id, role, password_hash',
+    [await bcrypt.hash(next, 10), req.user.userId]);
   await audit({ clinicId: clinic(req), userId: req.user.userId, ip: req.ip }, 'auth.password_changed', 'user', req.user.userId);
-  return { ok: true };
+  // As outras sessões caem (a marca da senha mudou); esta recebe um token novo para continuar aberta.
+  return { ok: true, token: app.signSession(nu) };
 });
 
 // ---------- Dashboard / agenda ----------
@@ -148,19 +170,22 @@ const apptBody = z.object({
   .refine((v) => Date.parse(v.endsAt) - Date.parse(v.startsAt) <= 24 * 3600e3, 'atendimento de no máximo 24 horas');
 app.post('/appointments', guard, async (req, reply) => {
   const b = apptBody.parse(req.body);
+  await ensureSchema();
   const [row] = await q(
     `INSERT INTO appointments (clinic_id, patient_id, procedure_id, professional_id, starts_at, ends_at, price)
      SELECT $1,$2,$3,$4,$5,$6, COALESCE($7, (SELECT default_price FROM procedures WHERE id=$3 AND clinic_id=$1))
-     WHERE EXISTS (SELECT 1 FROM patients WHERE id=$2 AND clinic_id=$1)
+     WHERE EXISTS (SELECT 1 FROM patients WHERE id=$2 AND clinic_id=$1 AND anonymized_at IS NULL)
        -- procedimento e profissional só da própria clínica (as FKs não conferem a clínica)
        AND ($3::uuid IS NULL OR EXISTS (SELECT 1 FROM procedures WHERE id=$3 AND clinic_id=$1))
        AND ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM users WHERE id=$4 AND clinic_id=$1))
        AND NOT EXISTS (SELECT 1 FROM appointments x WHERE x.clinic_id=$1 AND x.status NOT IN ('canceled','no_show')
                        AND x.starts_at < $6 AND x.ends_at > $5 AND ($4::uuid IS NULL OR x.professional_id=$4))
      RETURNING *`,
-    [clinic(req), b.patientId, b.procedureId ?? null, b.professionalId ?? null, b.startsAt, b.endsAt, b.price ?? null]);
+    // Preço diferente do cadastrado no procedimento só dono e gerente definem: o valor vira receita ao concluir.
+    [clinic(req), b.patientId, b.procedureId ?? null, b.professionalId ?? null, b.startsAt, b.endsAt,
+      MANAGERS.includes(req.user.role) ? b.price ?? null : null]);
   if (!row) {
-    const [p] = await q(`SELECT EXISTS (SELECT 1 FROM patients WHERE id=$1 AND clinic_id=$2) AS patient,
+    const [p] = await q(`SELECT EXISTS (SELECT 1 FROM patients WHERE id=$1 AND clinic_id=$2 AND anonymized_at IS NULL) AS patient,
       ($3::uuid IS NULL OR EXISTS (SELECT 1 FROM procedures WHERE id=$3 AND clinic_id=$2)) AS procedure,
       ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM users WHERE id=$4 AND clinic_id=$2)) AS professional`,
       [b.patientId, clinic(req), b.procedureId ?? null, b.professionalId ?? null]);
@@ -196,9 +221,12 @@ app.patch('/appointments/:id', guard, async (req, reply) => {
   return row;
 });
 
-// Concluir atendimento (legado): fecha e gera a receita. NÃO baixa estoque; a baixa só ocorre com confirmação em POST /appointments/:id/conclude (atendimento.js)
+// Concluir atendimento (rápido): fecha, gera a receita e a sugestão de retorno, e deixa trilha de auditoria. Qualquer perfil pode (a recepção
+// fecha o atendimento para cobrança), mas NÃO baixa estoque nem registra lotes: isso só ocorre com confirmação em POST /appointments/:id/conclude
+// (atendimento.js, perfis clínicos). A trilha 'appointment.complete_quick' marca os atendimentos fechados sem baixa de estoque.
 app.post('/appointments/:id/complete', guard, async (req, reply) => {
   const { id } = z.object({ id: z.guid() }).parse(req.params);
+  await ensureSchema();
   const { pool } = await import('./db.js');
   const c = await pool.connect();
   try {
@@ -216,16 +244,23 @@ app.post('/appointments/:id/complete', guard, async (req, reply) => {
          FROM (SELECT (now() AT TIME ZONE timezone)::date AS d FROM clinics WHERE id=$1) c`,
         [a.clinic_id, a.id, a.price]);
     }
+    await suggestReturn(c, { clinicId: a.clinic_id, appointmentId: a.id, patientId: a.patient_id, procedureId: a.procedure_id });
+    await c.query(`INSERT INTO audit_log (clinic_id, user_id, action, entity, entity_id, ip) VALUES ($1,$2,'appointment.complete_quick','appointment',$3,$4)`,
+      [a.clinic_id, req.user.userId, a.id, req.ip ?? null]);
     await c.query('COMMIT');
     return a;
   } catch (e) { await c.query('ROLLBACK'); throw e; } finally { c.release(); }
 });
 
 // ---------- Pacientes ----------
-app.get('/patients', guard, (req) => {
+app.get('/patients', guard, async (req) => {
+  await ensureSchema();
   const { search } = z.object({ search: z.string().max(80).default('') }).parse(req.query ?? {});
+  // Sem acento e sem maiúsculas dos dois lados (quem digita no celular costuma omitir acento); % e _ digitados são literais.
+  const fold = (x) => `translate(lower(${x}), 'áàâãäéèêëíìîïóòôõöúùûüçñ', 'aaaaaeeeeiiiiooooouuuucn')`;
   return q(`SELECT id, full_name, birth_date, phone FROM patients
-            WHERE clinic_id=$1 AND full_name ILIKE $2 ORDER BY full_name LIMIT 50`, [clinic(req), `%${search}%`]);
+            WHERE clinic_id=$1 AND anonymized_at IS NULL AND ${fold('full_name')} LIKE ${fold('$2')} ORDER BY full_name LIMIT 50`,
+    [clinic(req), `%${search.replace(/[\\%_]/g, '\\$&')}%`]);
 });
 // POST /patients, ficha com CPF e prontuário: ver prontuario.js (dados sensíveis, cifrados e auditados)
 
@@ -278,11 +313,13 @@ const aiError = (req, reply, e) => {
   return reply.code(f.code).send({ error: f.error });
 };
 app.post('/sara/chat', { ...guard, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
-  const { message, conversationId } = z.object({
-    message: z.string().min(1).max(2000), conversationId: z.guid().optional() }).parse(req.body);
-  try { return await askSara({ clinicId: clinic(req), userId: req.user.userId, role: req.user.role, ip: req.ip, message, conversationId }); }
+  const { message, conversationId, messageId } = z.object({
+    message: z.string().min(1).max(2000), conversationId: z.guid().optional(), messageId: z.guid().optional() }).parse(req.body);
+  try { return await askSara({ clinicId: clinic(req), userId: req.user.userId, role: req.user.role, ip: req.ip, message, conversationId, messageId }); }
   catch (e) { return aiError(req, reply, e); }
 });
+// Conversa mais recente da própria pessoa (12 h), para a tela reabrir depois de recarregar. Só texto; nunca de outro usuário.
+app.get('/sara/history', guard, async (req) => sealedHistory({ clinicId: clinic(req), userId: req.user.userId }));
 // Teste de conexão com a IA (configurações): uma chamada mínima, só para o dono.
 app.post('/sara/test', { ...owner, config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (req, reply) => {
   try { await pingSara(); return { ok: true }; } catch (e) { return aiError(req, reply, e); }

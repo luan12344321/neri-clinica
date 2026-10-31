@@ -13,14 +13,16 @@ const loadErr = (e: unknown) =>
 
 // `path` nulo = não carrega. `every` (ms) recarrega periodicamente enquanto a aba está visível.
 export function useLoad<T>(path: string | null, every?: number) {
-  const [data, setData] = useState<T | null>(null);
+  // dado guardado junto do caminho: ao trocar de semana/mês a tela não mostra os números do período anterior sob o título novo
+  const [loaded, setLoaded] = useState<{ path: string; data: T } | null>(null);
+  const data = loaded && loaded.path === path ? loaded.data : null;
   const [error, setError] = useState('');
   const current = useRef(path);
   current.current = path;
   const reload = useCallback(() => {
     if (path === null) return;
     // resposta de um caminho antigo (ex.: semana anterior da Agenda, clicada rápido) chega depois e é descartada
-    api<T>(path).then((d) => { if (current.current === path) { setData(d); setError(''); } })
+    api<T>(path).then((d) => { if (current.current === path) { setLoaded({ path, data: d }); setError(''); } })
       .catch((e) => { if (current.current === path) setError(loadErr(e)); });
   }, [path]);
   useEffect(() => { reload(); }, [reload]);

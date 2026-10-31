@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ApiError, api, brl } from './api';
+import { ApiError, api, brl, dayISO } from './api';
 import { useLoad } from './hooks';
 import { Icon } from './Icon';
 import { AgendarRetornoButton } from './AgendarRetorno';
@@ -14,8 +14,6 @@ type Item = {
 };
 type Result = 'scheduled' | 'declined' | 'no_response' | 'remind_later';
 
-const TZ = 'America/Sao_Paulo';
-const ymd = (plusDays = 0) => new Date(Date.now() + plusDays * 864e5).toLocaleDateString('sv-SE', { timeZone: TZ });
 const URGENCY: Record<Item['urgency'], { label: string; cls: string }> = {
   high: { label: 'Vencido', cls: 'pill warn' }, medium: { label: 'Fecha em breve', cls: 'pill hi' }, low: { label: 'Na janela', cls: 'pill' },
 };
@@ -30,7 +28,7 @@ export function RetornosDoDia() {
   const [busy, setBusy] = useState('');
   const [consentFor, setConsentFor] = useState<Item | null>(null);
   const [remindFor, setRemindFor] = useState<Item | null>(null);
-  const [remindOn, setRemindOn] = useState(ymd(7));
+  const [remindOn, setRemindOn] = useState(dayISO(7));
 
   async function register(it: Item, result: Result, date?: string) {
     setBusy(it.id);
@@ -95,7 +93,7 @@ export function RetornosDoDia() {
                   {RESULTS.map((r) => (
                     <button key={r.id} className="ghost sm" style={touch} disabled={disabled} onClick={() => register(it, r.id)}>{r.label}</button>
                   ))}
-                  <button className="ghost sm" style={touch} disabled={disabled} onClick={() => { setRemindOn(ymd(7)); setRemindFor(it); }}>Lembrar depois</button>
+                  <button className="ghost sm" style={touch} disabled={disabled} onClick={() => { setRemindOn(dayISO(7)); setRemindFor(it); }}>Lembrar depois</button>
                 </div>
               </li>
             );
@@ -108,7 +106,7 @@ export function RetornosDoDia() {
         <Sheet title="Lembrar depois" onClose={() => setRemindFor(null)}>
           <p className="muted">Quando o retorno de {remindFor.patient.name.split(/\s+/)[0]} volta para a fila?</p>
           <label style={{ display: 'grid', gap: 4, margin: '12px 0' }}>Data do lembrete
-            <input type="date" value={remindOn} min={ymd(1)} max={ymd(180)} onChange={(e) => setRemindOn(e.target.value)} style={{ minHeight: 44 }} />
+            <input type="date" value={remindOn} min={dayISO(1)} max={dayISO(180)} onChange={(e) => setRemindOn(e.target.value)} style={{ minHeight: 44 }} />
           </label>
           <button className="primary" style={touch} disabled={busy === remindFor.id || !remindOn} onClick={() => register(remindFor, 'remind_later', remindOn)}>Salvar lembrete</button>
         </Sheet>

@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { ApiError, api, brl } from './api';
+import { ApiError, api, brl, dayISO } from './api';
 import { useLoad } from './hooks';
 import { ComprovantesDoPaciente } from './Comprovante';
 import { ConcluirAtendimento } from './Atendimento';
@@ -21,13 +21,42 @@ const KNOWN: Record<string, string> = {
   'email in use': 'Já existe um usuário com esse e-mail.',
   'wrong password': 'Senha atual incorreta.',
   slot_taken: 'Esse horário já está ocupado. Escolha outro horário.',
+  'invalid pix key': 'Chave Pix inválida. Confira o tipo e o valor da chave.',
+  'terms version outdated': 'Os termos foram atualizados. Recarregue a página e aceite a versão nova.',
+  'product not found or insufficient stock': 'Estoque insuficiente para essa saída.',
+  'not found or already closed': 'Este atendimento já foi concluído, cancelado ou removido. Atualize a tela.',
+  'category not found': 'Categoria não encontrada. Atualize a tela e escolha de novo.',
+  'bank account not found': 'Conta bancária não encontrada. Atualize a tela.',
+  'template or procedure not found': 'Modelo ou procedimento não encontrado. Atualize a tela.',
+  'lot already exists': 'Esse lote já está cadastrado.',
+  'too many attempts': 'Muitas tentativas seguidas. Aguarde um minuto e tente de novo.',
+  'invalid code': 'Código incorreto, vencido ou já usado. Confira o código no aplicativo e tente de novo.',
+  'already enabled': 'A verificação em duas etapas já está ligada.',
+  'setup first': 'Comece a ativação de novo para gerar o código QR.',
+  legal_hold: 'Este titular está com retenção legal ativa. Remova o bloqueio antes de anonimizar.',
+  'open appointments': 'Há consultas futuras agendadas. Cancele ou conclua antes de anonimizar.',
+  'name mismatch': 'O nome digitado não confere com o do cadastro.',
+  'already anonymized': 'Este titular já foi anonimizado.',
+  anonymized: 'Este cadastro foi anonimizado e não pode ser alterado.',
+  conversation_busy: 'A Julia ainda está respondendo a mensagem anterior. Aguarde um instante.',
 };
+// Número digitado no jeito brasileiro ("1.234,50" ou "150,5") ou com ponto ("150.5"). Campo numérico é texto com teclado decimal:
+// o <input type="number"> descarta a vírgula em alguns celulares e o valor chegava vazio.
+// "1.500" e "12.000" (ponto de milhar, sem vírgula) são mil e quinhentos / doze mil, não 1,5 / 12.
+const toNum = (s: string) => Number(s.includes(',') || /^\d{1,3}(\.\d{3})+$/.test(s) ? s.replace(/\./g, '').replace(',', '.') : s);
+// O servidor mistura códigos em inglês ("not found") com frases prontas em português ("Informe a data..."):
+// só as frases em português vão para a tela. ponytail: heurística (acento ou frase com ponto final); trocar por `detail` pt-BR do servidor se surgir código novo com maiúscula.
+const ptPhrase = (m: string) => /[À-ú]/.test(m) || /^[A-Z][^']*\.$/.test(m);
 export const errText = (e: unknown) =>
-  e instanceof ApiError && e.status === 403 && e.message in KNOWN ? KNOWN[e.message]!
-  : e instanceof ApiError && e.status === 403 ? 'Sem permissão para esta ação.'
-  : e instanceof ApiError && e.message === 'validation' ? 'Confira os campos preenchidos (senhas precisam de 10 ou mais caracteres).'
-  : e instanceof ApiError && e.message in KNOWN ? KNOWN[e.message]!
-  : e instanceof ApiError && e.status < 500 ? e.message : 'Não foi possível salvar. Tente novamente.';
+  !(e instanceof ApiError) ? (navigator.onLine ? 'Sem conexão com o servidor. Tente de novo em instantes.' : 'Você está sem internet. Confira a conexão e tente de novo.')
+  : e.message in KNOWN ? KNOWN[e.message]!
+  : e.status === 403 ? 'Sem permissão para esta ação.'
+  : e.status === 429 ? 'Muitas tentativas seguidas. Aguarde um minuto e tente de novo.'
+  : e.message === 'validation' ? 'Confira os campos preenchidos (senhas precisam de 10 ou mais caracteres).'
+  : e.status < 500 && ptPhrase(e.message) ? e.message
+  : e.status === 404 || e.status === 410 ? 'Este item não existe mais. Ele pode ter sido removido por outra pessoa da equipe.'
+  : e.status === 409 ? 'Este item mudou enquanto você editava. Atualize a tela e tente de novo.'
+  : 'Não foi possível salvar. Tente novamente.';
 
 export function AddForm({ fields, label, onSubmit }: { fields: Field[]; label: string; onSubmit: (v: Record<string, unknown>) => Promise<void> }) {
   const init = () => Object.fromEntries(fields.map((f) => [f.name, f.def ?? (f.type === 'checkbox' ? false : '')])) as Values;
@@ -42,7 +71,7 @@ export function AddForm({ fields, label, onSubmit }: { fields: Field[]; label: s
     const clean = (f: Field) => { const raw = v[f.name]; return typeof raw === 'string' && f.type !== 'password' ? raw.trim() : raw; };
     const found = Object.fromEntries(fields.flatMap((f) => {
       const val = String(clean(f) ?? '');
-      const msg = val && f.check ? f.check(val) : null;
+      const msg = val && f.type === 'number' && Number.isNaN(toNum(val)) ? 'Digite só o número (ex.: 150,50).' : val && f.check ? f.check(val) : null;
       return msg ? [[f.name, msg]] : [];
     }));
     setBad(found);
@@ -53,7 +82,7 @@ export function AddForm({ fields, label, onSubmit }: { fields: Field[]; label: s
     for (const f of fields) {
       const val = clean(f);
       if (f.type === 'checkbox') out[f.name] = !!val;
-      else if (val !== '') out[f.name] = f.type === 'number' ? Number(val) : val;
+      else if (val !== '') out[f.name] = f.type === 'number' ? toNum(String(val)) : val;
     }
     try { await onSubmit(out); setV(init()); } catch (x) {
       // a dica de senha do errText só faz sentido em formulário com senha
@@ -74,7 +103,7 @@ export function AddForm({ fields, label, onSubmit }: { fields: Field[]; label: s
           ) : f.type === 'textarea' ? (
             <textarea rows={3} value={String(v[f.name])} required={f.required} onChange={(e) => setV({ ...v, [f.name]: e.target.value })} />
           ) : (
-            <input name={f.name} type={f.type ?? 'text'} autoComplete={f.type === 'password' ? 'new-password' : f.type === 'email' ? 'off' : f.type === 'tel' ? 'tel' : undefined} step={f.step}
+            <input name={f.name} type={f.type === 'number' ? 'text' : f.type ?? 'text'} autoComplete={f.type === 'password' ? 'new-password' : f.type === 'email' ? 'off' : f.type === 'tel' ? 'tel' : undefined} step={f.step}
               inputMode={f.type === 'number' ? 'decimal' : f.type === 'tel' ? 'tel' : f.numeric ? 'numeric' : undefined} value={String(v[f.name])}
               required={f.required} aria-invalid={bad[f.name] ? true : undefined} aria-describedby={bad[f.name] ? `${f.name}-err` : undefined}
               onChange={(e) => { setV({ ...v, [f.name]: e.target.value }); if (bad[f.name]) setBad(({ [f.name]: _, ...rest }) => rest); }} />
@@ -89,10 +118,10 @@ export function AddForm({ fields, label, onSubmit }: { fields: Field[]; label: s
 }
 
 const Loading = ({ error, ready, rows }: { error: string; ready: boolean; rows?: number }) =>
-  error ? <p role="alert" className="err">{error}</p> : !ready ? <ListSkeleton rows={rows} /> : null;
+  error ? <p role="alert" className="err">{error === 'forbidden' ? 'Seu perfil não tem acesso a estas informações.' : error}</p> : !ready ? <ListSkeleton rows={rows} /> : null;
 
 const dateBR = (d: string) => new Date(`${String(d).slice(0, 10)}T12:00`).toLocaleDateString('pt-BR');
-const isBirthday = (d?: string | null) => !!d && String(d).slice(5, 10) === new Date().toISOString().slice(5, 10);
+const isBirthday = (d?: string | null) => !!d && String(d).slice(5, 10) === dayISO().slice(5, 10);
 
 // ---------- Agendar e reagendar: dia e horário em chips (horários ocupados e passados ficam desativados) ----------
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -123,7 +152,7 @@ export function SlotPicker({ value, onChange, ignoreId }: { value: Slot; onChang
   const groups = showAll ? [{ label: 'Qualquer horário', times: SLOTS }] : intervals.map(([s, e]) => ({ label: `${fromMin(s)} às ${fromMin(e)}`, times: slotsOf([[s, e]]) }));
   const taken = (time: string) => {
     const t0 = new Date(`${value.date}T${time}`).getTime();
-    return (day.data ?? []).some((a) => a.id !== ignoreId && a.status !== 'canceled' && t0 >= new Date(a.starts_at).getTime() && t0 < new Date(a.ends_at).getTime());
+    return (day.data ?? []).some((a) => a.id !== ignoreId && !['canceled', 'no_show'].includes(a.status) && t0 >= new Date(a.starts_at).getTime() && t0 < new Date(a.ends_at).getTime());
   };
   const past = (time: string) => new Date(`${value.date}T${time}`).getTime() < Date.now();
   return (
@@ -132,7 +161,7 @@ export function SlotPicker({ value, onChange, ignoreId }: { value: Slot; onChang
         {days.map((d) => {
           const closed = !showAll && !isOpen(d);
           return (
-            <button key={ymd(d)} role="option" aria-selected={value.date === ymd(d)} disabled={closed} className={closed ? 'closed' : ''} onClick={() => onChange({ date: ymd(d), time: '' })}>
+            <button type="button" key={ymd(d)} role="option" aria-selected={value.date === ymd(d)} disabled={closed} className={closed ? 'closed' : ''} onClick={() => onChange({ date: ymd(d), time: '' })}>
               <i>{d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '')}</i><b>{d.getDate()}</b>
             </button>
           );
@@ -145,7 +174,7 @@ export function SlotPicker({ value, onChange, ignoreId }: { value: Slot; onChang
           <div className="time-grid" role="listbox" aria-label={`Horários ${g.label}`}>
             {g.times.map((time) => {
               const off = past(time) || taken(time);
-              return <button key={time} role="option" aria-selected={value.time === time} disabled={off} onClick={() => onChange({ ...value, time })}>{time}</button>;
+              return <button type="button" key={time} role="option" aria-selected={value.time === time} disabled={off} onClick={() => onChange({ ...value, time })}>{time}</button>;
             })}
           </div>
         </div>
@@ -157,9 +186,15 @@ export function SlotPicker({ value, onChange, ignoreId }: { value: Slot; onChang
 
 export function AppointmentSheet({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const toast = useToast();
-  const patients = useList<any[]>('/patients');
+  // o servidor devolve no máximo 50 pacientes por consulta: com busca, qualquer paciente da clínica pode ser agendado
+  const [search, setSearch] = useState('');
+  const [term, setTerm] = useState('');
+  useEffect(() => { const t = setTimeout(() => setTerm(search.trim()), 250); return () => clearTimeout(t); }, [search]);
+  const patients = useList<any[]>(`/patients?search=${encodeURIComponent(term)}`);
+  const [chosen, setChosen] = useState<{ id: string; full_name: string } | null>(null); // continua na lista mesmo se a busca mudar
   const procs = useList<any[]>('/procedures');
-  const [patientId, setPatientId] = useState('');
+  const patientId = chosen?.id ?? '';
+  const patientOpts = [...(chosen && !patients.data?.some((p) => p.id === chosen.id) ? [chosen] : []), ...(patients.data ?? [])];
   const [procedureId, setProcedureId] = useState('');
   const [slot, setSlot] = useState<Slot>({ date: ymd(new Date()), time: '' });
   const [busy, setBusy] = useState(false);
@@ -180,11 +215,15 @@ export function AppointmentSheet({ onClose, onCreated }: { onClose: () => void; 
   return (
     <Sheet title="Novo agendamento" onClose={onClose}>
       <form className="form" onSubmit={submit}>
+        <label>Buscar paciente
+          <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Digite parte do nome" autoComplete="off" />
+        </label>
         <label>Paciente
-          <select value={patientId} onChange={(e) => setPatientId(e.target.value)} required>
-            <option value="">Selecione…</option>
-            {patients.data?.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+          <select value={patientId} onChange={(e) => setChosen(patientOpts.find((p) => p.id === e.target.value) ?? null)} required>
+            <option value="">{patients.error ? 'Não foi possível carregar' : !patients.data ? 'Carregando…' : patients.data.length ? 'Selecione…' : 'Nenhum paciente com esse nome'}</option>
+            {patientOpts.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
           </select>
+          {patients.data?.length === 50 && <span className="muted">Mostrando os 50 primeiros. Digite o nome para achar os demais.</span>}
         </label>
         <label>Procedimento
           <select value={procedureId} onChange={(e) => setProcedureId(e.target.value)}>
@@ -260,7 +299,7 @@ function Patients({ autoOpen = false, focus = null, onFinish }: { autoOpen?: boo
   if (open) return <PatientDetail id={open} onClose={() => setOpen(null)} session={focus?.id === open ? focus.appt : undefined} onFinish={onFinish} />;
   return (
     <>
-      <PageHead title="Pacientes" hint={l.data ? `${l.data.length} ${term ? 'encontrado(s)' : 'cadastrado(s)'}` : undefined}>
+      <PageHead title="Pacientes" hint={l.data ? (l.data.length >= 50 ? 'Mostrando os 50 primeiros. Busque pelo nome para achar os demais.' : `${l.data.length} ${term ? 'encontrado(s)' : 'cadastrado(s)'}`) : undefined}>
         <button className="primary sm" onClick={() => setAdding(true)}><Icon name="plus" size={16} />Novo paciente</button>
       </PageHead>
       <label className="search"><Icon name="search" size={18} /><input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por nome" aria-label="Buscar paciente" /></label>
@@ -318,6 +357,7 @@ function PatientDetail({ id, onClose, session, onFinish }: { id: string; onClose
   const recs = useLoad<any[]>(`/patients/${id}/records`);
   const ai = useLoad<any[]>(`/patients/${id}/ai-usage`); // vezes em que a Julia consultou o prontuário
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(false); // corrigir dados cadastrais (LGPD art. 18, III)
   const [tab, setTab] = useState<'prontuario' | 'autorizacoes' | 'comprovantes'>('prontuario');
   const toast = useToast();
   const denied = p.error === 'forbidden' || recs.error === 'forbidden';
@@ -348,6 +388,7 @@ function PatientDetail({ id, onClose, session, onFinish }: { id: string; onClose
                 </dl>
               </div>
               <p className="muted note">Dados sensíveis: cada acesso a esta ficha é registrado.</p>
+              <button className="ghost sm" onClick={() => setEditing(true)}>Corrigir dados</button>
             </section>
           )}
           <div className="seg2" role="tablist" aria-label="Seções da ficha">
@@ -355,6 +396,17 @@ function PatientDetail({ id, onClose, session, onFinish }: { id: string; onClose
               <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>{l}</button>
             ))}
           </div>
+          {editing && p.data && (
+            <Sheet title="Corrigir dados" onClose={() => setEditing(false)}>
+              <p className="muted">Corrige nome e contato. O prontuário não é editado: para corrigir uma informação clínica, faça um novo registro.</p>
+              <AddForm label="Salvar correção" fields={[
+                { name: 'fullName', label: 'Nome completo', def: p.data.full_name, required: true },
+                { name: 'birthDate', label: 'Nascimento', type: 'date', def: p.data.birth_date?.slice(0, 10) ?? '' },
+                { name: 'phone', label: 'Telefone (com DDD)', type: 'tel', def: p.data.phone ?? '', check: phoneCheck },
+                { name: 'email', label: 'E-mail', type: 'email', def: p.data.email ?? '' },
+              ]} onSubmit={async (v) => { await api(`/patients/${id}`, { method: 'PATCH', json: { fullName: v.fullName, birthDate: v.birthDate ?? null, phone: v.phone ?? null, email: v.email ?? null } }); setEditing(false); p.reload(); toast('Dados corrigidos'); }} />
+            </Sheet>
+          )}
           {tab === 'autorizacoes' && p.data && <section className="card"><ConsentimentoPaciente patientId={id} /></section>}
           {tab === 'prontuario' && <PageHead title="Prontuário"><button className="primary sm" onClick={() => setAdding(true)}><Icon name="plus" size={16} />Novo registro</button></PageHead>}
           {tab === 'prontuario' && <section className="card">
@@ -385,7 +437,7 @@ function PatientDetail({ id, onClose, session, onFinish }: { id: string; onClose
 }
 
 function Procedures() {
-  const { isManager } = useRole();
+  const { isManager, isClinical } = useRole(); // regra de retorno: só perfis clínicos podem ver (o servidor recusa a recepção)
   const l = useList<any[]>('/procedures');
   const [adding, setAdding] = useState(false);
   const [ruleFor, setRuleFor] = useState<{ id: string; name: string } | null>(null);
@@ -404,7 +456,7 @@ function Procedures() {
               <span className="q-ico"><Icon name="syringe" size={20} /></span>
               <span className="grow"><b>{p.name}</b><span className="muted">{p.duration_min} min</span></span>
               <b className="amount">{brl(Number(p.default_price))}</b>
-              <button className="ghost sm" style={{ minHeight: 44 }} onClick={() => setRuleFor({ id: p.id, name: p.name })} aria-label={`Regra de retorno de ${p.name}`}>Retorno</button>
+              {isClinical && <button className="ghost sm" style={{ minHeight: 44 }} onClick={() => setRuleFor({ id: p.id, name: p.name })} aria-label={`Regra de retorno de ${p.name}`}>Retorno</button>}
             </div>
           </li>
         ))}</ul>
@@ -428,14 +480,16 @@ function StockRow({ p, onDone }: { p: any; onDone: () => void }) {
   const [err, setErr] = useState('');
   const [open, setOpen] = useState(false);
   const toast = useToast();
+  const [busy, setBusy] = useState(false);
   async function move(sign: 1 | -1, reason: 'purchase' | 'loss') {
-    const n = Number(qty);
-    if (!n || n <= 0) return;
-    setErr('');
+    const n = toNum(qty.trim());
+    if (busy || !n || n <= 0) return; // toque duplo não lança o movimento duas vezes
+    setErr(''); setBusy(true);
     try {
       await api(`/products/${p.id}/movements`, { method: 'POST', json: { delta: sign * n, reason } });
       setQty(''); setOpen(false); onDone(); toast(reason === 'purchase' ? 'Entrada registrada' : 'Perda registrada');
     } catch (e) { setErr(e instanceof ApiError && e.status === 409 ? 'Estoque insuficiente.' : errText(e)); }
+    finally { setBusy(false); }
   }
   const q = Number(p.quantity), min = Number(p.min_quantity), target = Number(p.target_quantity);
   const low = q <= min;
@@ -449,9 +503,9 @@ function StockRow({ p, onDone }: { p: any; onDone: () => void }) {
       <div className={`meter${low ? ' low' : ''}`} role="img" aria-label={`${q} de ${target} ${p.unit}`}><div style={{ width: `${fill}%` }} /></div>
       {!open ? <button className="link" onClick={() => setOpen(true)}>Movimentar estoque</button> : (
         <div className="adjust">
-          <input type="number" min="0" step="any" inputMode="decimal" placeholder="Quantidade" aria-label={`Quantidade de ${p.name}`} value={qty} onChange={(e) => setQty(e.target.value)} autoFocus />
-          <button className="ghost sm" onClick={() => move(1, 'purchase')}>Entrada</button>
-          <button className="ghost sm" onClick={() => move(-1, 'loss')}>Perda</button>
+          <input type="text" inputMode="decimal" placeholder="Quantidade" aria-label={`Quantidade de ${p.name}`} value={qty} onChange={(e) => setQty(e.target.value)} autoFocus />
+          <button className="ghost sm" disabled={busy} onClick={() => move(1, 'purchase')}>Entrada</button>
+          <button className="ghost sm" disabled={busy} onClick={() => move(-1, 'loss')}>Perda</button>
         </div>
       )}
       {err && <p role="alert" className="err">{err}</p>}

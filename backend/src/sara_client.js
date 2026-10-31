@@ -1,10 +1,10 @@
 import { z } from 'zod';
 import { q } from './db.js';
 import { audit } from './audit.js';
-import { generate } from './gemini.js';
+import { generate, BudgetError } from './gemini.js';
 import { DEFAULT_HOURS } from './hours.js';
 import { ensureSchema } from './schema.js';
-import { ToolError, availableSlots, cancelAppointment, checkBudget, createAppointment, rescheduleAppointment } from './sara.js';
+import { ToolError, availableSlots, cancelAppointment, checkBudget, createAppointment, num, rescheduleAppointment } from './sara.js';
 
 // Júlia no WhatsApp, falando com CLIENTES. Diferente da Júlia interna: o paciente vem do telefone de quem escreveu
 // (identidade verificada pela Meta), nunca do que o modelo diz, e as ferramentas só alcançam os dados dessa pessoa.
@@ -118,8 +118,19 @@ export const splitReply = (text) => {
 };
 
 // Gera a resposta para a última mensagem do contato. O chamador grava/envia. Devolve { texts, usage, handoff }.
+// Quem escreve no WhatsApp é anônimo: teto diário por contato e por clínica, para um número (ou vários) não queimar
+// num dia o orçamento do mês e deixar a clínica sem a Julia interna.
+export async function checkWhatsAppBudget(clinicId, contact) {
+  const [u] = await q(`SELECT coalesce(sum(t), 0)::bigint AS clinic, coalesce(sum(t) FILTER (WHERE contact=$2), 0)::bigint AS contact
+                       FROM (SELECT contact, coalesce(tokens_in, 0) + coalesce(tokens_out, 0) AS t FROM wa_messages
+                             WHERE clinic_id=$1 AND created_at > now() - interval '24 hours') d`, [clinicId, contact]);
+  if (Number(u.contact) >= num(process.env.GEMINI_WA_CONTACT_DAILY_TOKENS, 60_000)) throw new BudgetError('whatsapp contato');
+  if (Number(u.clinic) >= num(process.env.GEMINI_WA_CLINIC_DAILY_TOKENS, 200_000)) throw new BudgetError('whatsapp clínica');
+}
+
 export async function answerClient({ clinic, contact, client = defaultClient }) {
   await checkBudget(clinic.id);
+  await checkWhatsAppBudget(clinic.id, contact);
   const phone11 = contact.slice(-11);
   const candidates = contact.length >= 8
     ? await q(`SELECT id, full_name FROM patients WHERE clinic_id=$1 AND length(regexp_replace(coalesce(phone,''),'\\D','','g')) >= 8

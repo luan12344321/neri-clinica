@@ -117,7 +117,8 @@ export default async function banks(app) {
     const [acct] = await q(`SELECT id, name, pix_key_enc FROM bank_accounts
       WHERE clinic_id=$1 AND active AND pix_key_enc IS NOT NULL AND ($2::uuid IS NULL OR id=$2)
       ORDER BY is_default DESC, created_at LIMIT 1`, [cid(req), bankAccountId ?? null]);
-    if (!acct) return reply.code(409).send({ error: 'no pix key' });
+    // Sem chave Pix cadastrada não é erro nem conflito: é o estado inicial da clínica. 200 com motivo evita 4xx no console da tela.
+    if (!acct) return { available: false, reason: 'no_pix_key' };
     const key = decrypt(acct.pix_key_enc, pixAad(acct.id));
     return { payload: pixPayload({ key, name: t.clinic, amount: t.amount, txid: `T${t.id.replace(/-/g, '')}` }),
       amount: t.amount, bank: acct.name, keyMasked: maskKey(key) };

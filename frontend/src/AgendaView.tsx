@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from './api';
+import { api, dayISO } from './api';
 import { useLoad } from './hooks';
 import { Icon } from './Icon';
 import { useHours, toMin } from './hours';
@@ -11,7 +11,6 @@ import { Empty, ListSkeleton, useRole, useToast } from './ui';
 // Calendário da Agenda (mês, semana, dia, lista). Toda conta de data é feita em strings "AAAA-MM-DD" no fuso da
 // clínica: toISOString é UTC e depois das 21h já seria amanhã.
 const TZ = 'America/Sao_Paulo';
-export const dayISO = (plusDays = 0) => new Date(Date.now() + plusDays * 864e5).toLocaleDateString('sv-SE', { timeZone: TZ });
 const asDate = (d: string) => new Date(`${d}T12:00:00Z`); // meio-dia UTC: só para aritmética e rótulos (timeZone UTC)
 const addDays = (d: string, n: number) => new Date(asDate(d).getTime() + n * 864e5).toISOString().slice(0, 10);
 const weekday = (d: string) => asDate(d).getUTCDay();
@@ -244,7 +243,7 @@ export function AgendaView({ onStart, completeErr }: { onStart: (patientId: stri
 
       {open && <ApptSheet appt={open} clinical={isClinical} busy={busy} onClose={() => setOpen(null)}
         onStart={() => { const a = open; setOpen(null); onStart(a.patient_id, a); }} onChart={() => { const a = open; setOpen(null); onStart(a.patient_id, null); }}
-        onComplete={() => complete(open.id)} onMove={() => { setMoving(open); setOpen(null); }} />}
+        onComplete={() => complete(open.id)} onMove={() => { setMoving(open); setOpen(null); }} onChanged={() => { setOpen(null); ap.reload(); }} />}
       {moving && <RescheduleSheet appt={moving} onClose={() => setMoving(null)} onDone={() => { setMoving(null); ap.reload(); }} />}
       {concluding && <ConcluirAtendimento appointmentId={concluding} onClose={() => setConcluding('')} onDone={ap.reload} />}
       {creating && <AppointmentSheet onClose={() => setCreating(false)} onCreated={() => { setCreating(false); ap.reload(); }} />}

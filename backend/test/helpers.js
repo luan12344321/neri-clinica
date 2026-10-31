@@ -48,8 +48,8 @@ export async function setup() {
         INSERT INTO patients (id, clinic_id, full_name) VALUES ('2b000000-0000-0000-0000-000000000001', '${B}', 'Paciente B');`);
     },
     async tokenFor(email) {
-      const [u] = await sql('SELECT id, clinic_id, role FROM users WHERE email=$1', [email]);
-      return app.jwt.sign({ userId: u.id, clinicId: u.clinic_id, role: u.role }, { expiresIn: '1h' });
+      const [u] = await sql('SELECT id, clinic_id, role, password_hash FROM users WHERE email=$1', [email]);
+      return app.signSession(u);
     },
     async call(method, url, { token, body, ip } = {}) {
       const res = await app.inject({ method, url, headers: token ? { authorization: `Bearer ${token}` } : {},

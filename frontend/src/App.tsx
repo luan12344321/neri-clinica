@@ -248,12 +248,22 @@ function Login({ onDone }: { onDone: () => void }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [show, setShow] = useState(false);
+  const [mfa, setMfa] = useState<string | null>(null); // token provisório: a senha passou, falta o código da verificação em duas etapas
+  const [code, setCode] = useState('');
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true); setError('');
-    try { const r = await api<{ token: string }>('/auth/login', { method: 'POST', json: { email, password } }); setToken(r.token); onDone(); }
+    try {
+      type Out = { token?: string; mfaRequired?: boolean; mfaToken?: string };
+      const r = mfa
+        ? await api<Out>('/auth/mfa', { method: 'POST', json: { mfaToken: mfa, code: code.trim() } })
+        : await api<Out>('/auth/login', { method: 'POST', json: { email, password } });
+      if (r.token) { setToken(r.token); onDone(); } else if (r.mfaRequired && r.mfaToken) { setMfa(r.mfaToken); setCode(''); }
+    }
     catch (err) {
+      if (mfa && err instanceof ApiError && err.status === 401 && err.message === 'invalid credentials') { setMfa(null); setPassword(''); setError('A verificação expirou. Entre de novo com e-mail e senha.'); return; }
       setError(!(err instanceof ApiError) ? (navigator.onLine ? 'O servidor não respondeu. Tente de novo em instantes.' : 'Você está sem internet. Confira a conexão e tente de novo.')
         : err.status === 429 ? 'Muitas tentativas seguidas. Por segurança, aguarde alguns minutos antes de tentar de novo.'
+        : err.message === 'invalid code' ? 'Código incorreto, vencido ou já usado. Confira o aplicativo ou use um código de recuperação.'
         : err.message === 'invalid credentials' ? 'E-mail ou senha incorretos.' : 'Não foi possível entrar. Tente novamente.');
     }
     finally { setBusy(false); }
@@ -266,10 +276,19 @@ function Login({ onDone }: { onDone: () => void }) {
       <h1>Clínica</h1>
       <SessionExpiredNote />
       <p className="muted">Gestão na palma da mão.</p>
+      {mfa ? (
+        <>
+          <p>Digite o código de 6 dígitos do seu aplicativo autenticador.</p>
+          <label>Código de verificação<input inputMode="numeric" autoComplete="one-time-code" autoFocus value={code} onChange={(e) => setCode(e.target.value)} required aria-describedby="mfa-hint" /></label>
+          <p id="mfa-hint" className="muted">Perdeu o celular? Digite um dos seus códigos de recuperação (xxxxx-xxxxx).</p>
+        </>
+      ) : (<>
       <label>E-mail<input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
       <label>Senha<span className="pw"><input type={show ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /><button type="button" aria-label={show ? 'Ocultar senha' : 'Mostrar senha'} onClick={() => setShow((s) => !s)}><Icon name={show ? 'eyeoff' : 'eye'} size={20} /></button></span></label>
+      </>)}
       {error && <p role="alert" className="err">{error}</p>}
-      <button className="primary" disabled={busy}>{busy ? 'Entrando…' : 'Entrar'}</button>
+      <button className="primary" disabled={busy}>{busy ? (mfa ? 'Verificando…' : 'Entrando…') : (mfa ? 'Verificar' : 'Entrar')}</button>
+      {mfa && <button type="button" className="ghost" onClick={() => { setMfa(null); setError(''); }}>Voltar</button>}
       <p className="login-hint">Esqueceu a senha? Peça ao proprietário para redefinir em Configurações → Equipe.</p>
       <LegalLinks />
     </form>
@@ -315,7 +334,7 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
   const now = Date.now();
   const timeOf = (a: any) => clock(new Date(a.starts_at));
   const today: any[] = d?.today ?? [];
-  const pending = today.filter((a) => a.status !== 'done' && a.status !== 'canceled');
+  const pending = today.filter((a) => a.status === 'scheduled' || a.status === 'confirmed'); // falta (no_show), cancelado e concluído não contam como por fazer
   const doneToday = today.filter((a) => a.status === 'done').length;
   const ended = (a: any) => new Date(a.ends_at ?? a.starts_at).getTime() < now;
   const next = pending.find((a) => !ended(a)) ?? null;
@@ -331,7 +350,9 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
   };
   // Ações da lista "Precisa de atenção". "Encaminhar" não tem tela própria: leva à agenda do dia.
   const onAttnAction = (kind: string) => {
-    const ref = (att.data?.items as any[] | undefined)?.find((i) => i.kind === 'late_appointments')?.refs?.[0] ?? late[0]; // inclui dias anteriores
+    const raw = (att.data?.items as any[] | undefined)?.find((i) => i.kind === 'late_appointments')?.refs?.[0]; // inclui dias anteriores
+    // a lista de atenção traz só {id, label, horários}: usa o atendimento completo de hoje quando houver, senão o primeiro nome como paciente
+    const ref = raw ? (today.find((a) => a.id === raw.id) ?? { ...raw, patient: raw.label }) : late[0];
     if (kind === 'register') { if (ref) complete(ref.id); else goAgenda(); }
     else if (kind === 'reschedule') { if (ref) setMoving(ref); else goAgenda(); }
     else if (kind === 'check_status' || kind === 'forward') goAgenda();
@@ -467,7 +488,7 @@ function Today({ name, restock, go, money, onBook, onPatient, onStart }: {
       )}
       {open && <ApptSheet appt={open} clinical={isClinical} busy={busyId === open.id} onClose={() => setOpen(null)}
         onStart={() => { const a = open; setOpen(null); onStart(a.patient_id, a); }} onChart={() => { const a = open; setOpen(null); onStart(a.patient_id, null); }}
-        onComplete={() => complete(open.id)} onMove={() => { setMoving(open); setOpen(null); }} />}
+        onComplete={() => complete(open.id)} onMove={() => { setMoving(open); setOpen(null); }} onChanged={() => { setOpen(null); reload(); }} />}
       {concluding && <ConcluirAtendimento appointmentId={concluding} onClose={() => setConcluding('')} onDone={reload} />}
       {moving && <RescheduleSheet appt={moving} onClose={() => setMoving(null)} onDone={() => { setMoving(null); reload(); }} />}
     </div>
@@ -537,15 +558,24 @@ function Julia({ name }: { name?: string }) {
   const [spoke, setSpoke] = useState<Mood | null>(null); // reação depois da resposta (fala ou tristeza em erro)
   const convo = useRef<string | undefined>(undefined);
   const end = useRef<HTMLDivElement>(null);
+  const [restoring, setRestoring] = useState(true); // busca a conversa guardada (últimas 12 h) antes de aceitar a primeira mensagem
   const mood: Mood = busy ? 'think' : spoke ?? 'idle';
+  useEffect(() => {
+    let off = false;
+    api<{ conversationId: string | null; messages: { role: 'user' | 'sara'; text: string }[] }>('/sara/history')
+      .then((h) => { if (!off && h.conversationId && h.messages.length) { convo.current = h.conversationId; setMsgs(h.messages); } })
+      .catch(() => { /* sem histórico: começa uma conversa nova */ })
+      .finally(() => { if (!off) setRestoring(false); });
+    return () => { off = true; };
+  }, []);
   useEffect(() => { if (!spoke) return; const id = setTimeout(() => setSpoke(null), spoke === 'talk' ? 3200 : 3000); return () => clearTimeout(id); }, [spoke]);
   useEffect(() => { end.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs, busy]);
 
   async function send(message: string) {
-    if (!message.trim() || busy) return;
+    if (!message.trim() || busy || restoring) return;
     setMsgs((m) => [...m, { role: 'user', text: message }]); setText(''); setBusy(true);
     try {
-      const r = await api<{ conversationId: string; reply: string }>('/sara/chat', { method: 'POST', json: { message, conversationId: convo.current } });
+      const r = await api<{ conversationId: string; reply: string }>('/sara/chat', { method: 'POST', json: { message, conversationId: convo.current, messageId: globalThis.crypto?.randomUUID?.() } });
       convo.current = r.conversationId;
       setMsgs((m) => [...m, { role: 'sara', text: r.reply }]); setSpoke('talk');
     } catch (e) {
@@ -553,7 +583,10 @@ function Julia({ name }: { name?: string }) {
       const text = s === 503 ? 'A Julia está indisponível no momento. Avise o administrador da clínica.'
         : s === 504 ? 'A Julia demorou demais para responder. Tente uma pergunta mais curta.'
         : s === 429 ? 'Limite de uso da Julia atingido (por minuto ou do mês). Aguarde um pouco ou avise o administrador.'
-        : s === 403 ? 'Seu perfil não tem acesso à Julia.' : 'Não consegui responder agora.';
+        : s === 403 ? 'Seu perfil não tem acesso à Julia.'
+        : s === 409 ? 'A Julia ainda está respondendo à mensagem anterior. Aguarde um instante e envie de novo.'
+        : s === 404 ? 'Esta conversa não está mais disponível. Envie a mensagem de novo para começar outra.' : 'Não consegui responder agora.';
+      if (s === 404) convo.current = undefined;
       setMsgs((m) => [...m, { role: 'sara', text, retry: s === 403 ? undefined : message }]); setSpoke('sad');
     }
     finally { setBusy(false); }
@@ -565,6 +598,7 @@ function Julia({ name }: { name?: string }) {
         <div className="julia-dock">
           <Mascote variant="half" size={84} mood={mood} />
           <div><b>Julia</b><span className="muted">{busy ? 'Pensando…' : spoke === 'talk' ? 'Respondendo' : spoke === 'sad' ? 'Não deu certo' : 'Pronta para ajudar'}</span></div>
+          <button className="ghost sm" disabled={busy} onClick={() => { setMsgs([]); convo.current = globalThis.crypto?.randomUUID?.(); }}>Nova conversa</button>
         </div>
       )}
       <div className="log" aria-live="polite">
@@ -597,7 +631,7 @@ function Julia({ name }: { name?: string }) {
       </div>
       <form className="composer" onSubmit={(e) => { e.preventDefault(); send(text); }}>
         <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Pergunte à Julia…" maxLength={2000} aria-label="Mensagem para a Julia" />
-        <button className="send" aria-label="Enviar" disabled={busy || !text.trim()}><Icon name="send" size={20} /></button>
+        <button className="send" aria-label="Enviar" disabled={busy || restoring || !text.trim()}><Icon name="send" size={20} /></button>
       </form>
     </div>
   );

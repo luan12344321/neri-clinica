@@ -56,7 +56,7 @@ export async function getFinanceSummary(clinicId, monthStart) {
     `SELECT COUNT(*)::int AS n FROM appointments
      WHERE clinic_id=$1 AND status='done' AND price IS NOT NULL
        AND completed_at >= $2::date AND completed_at < $2::date + interval '1 month'`, [clinicId, monthStart]);
-  return { ...r, balance: r.income - r.expense,
+  return { ...r, balance: Math.round((r.income - r.expense) * 100) / 100, // float: sem isso sai -116.67000000000007
            averageTicket: t.n ? +(r.income / t.n).toFixed(2) : 0, proceduresDone: t.n };
 }
 

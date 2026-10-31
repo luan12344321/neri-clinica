@@ -1,5 +1,6 @@
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { setup, A, B } from './helpers.js';
 
 let t, askSara, toolsFor, BudgetError;
@@ -102,9 +103,9 @@ test('histórico antigo (formato do provedor anterior) é lido sem quebrar e sem
 test('histórico de uma conversa não vaza para outra clínica', async () => {
   const r = await ask(A, fakeClient([text('segredo da clínica A')]));
   const c = fakeClient([text('oi')]);
-  await ask(B, c, { conversationId: r.conversationId });
-  assert.equal(c.calls[0].contents.length, 1);
-  assert.ok(!JSON.stringify(c.calls[0].contents).includes('segredo'));
+  await assert.rejects(ask(B, c, { conversationId: r.conversationId }), { error: 'conversation_not_found', code: 404 });
+  assert.equal(c.calls.length, 0, 'a IA nem foi chamada');
+  assert.equal((await t.sql('SELECT count(*)::int n FROM sara_messages WHERE clinic_id=$1', [B]))[0].n, 0, 'nada gravado na conversa alheia');
 });
 
 test('histórico: outro usuário não lê a conversa mesmo sabendo o conversationId', async () => {
@@ -113,8 +114,8 @@ test('histórico: outro usuário não lê a conversa mesmo sabendo o conversatio
   const conversationId = '11111111-1111-4111-8111-111111111111';
   await askSara({ clinicId: A, userId: a.id, role: a.role, message: 'segredo da conversa', conversationId, client: fakeClient([text('ok')]) });
   const c = fakeClient([text('ok')]);
-  await askSara({ clinicId: A, userId: other.id, role: other.role, message: 'oi', conversationId, client: c });
-  assert.equal(c.calls[0].contents.length, 1, 'só a mensagem nova: o histórico do outro usuário não vem junto');
+  await assert.rejects(askSara({ clinicId: A, userId: other.id, role: other.role, message: 'oi', conversationId, client: c }), { error: 'conversation_not_found' });
+  assert.equal(c.calls.length, 0, 'o outro usuário não usa nem lê a conversa alheia');
   const c2 = fakeClient([text('ok')]);
   await askSara({ clinicId: A, userId: a.id, role: a.role, message: 'de novo', conversationId, client: c2 });
   assert.ok(c2.calls[0].contents.length > 1, 'o dono da conversa continua vendo o próprio histórico');
@@ -163,7 +164,14 @@ test('available_slots: respeita o horário de atendimento e a agenda real', asyn
 
 test('create_appointment: agenda de verdade, recusa horário ocupado, paciente de outra clínica e falta de confirmação', async () => {
   const patient = '20000000-0000-0000-0000-000000000001';
-  const book = (args, who = (c) => ask(A, c)) => { const c = fakeClient([toolUse('create_appointment', args), text('ok')]); return who(c).then(() => c); };
+  // Confirmação humana: a 1ª chamada só propõe; a mesma chamada numa mensagem seguinte da conversa executa.
+  const book = async (args) => {
+    const conversationId = randomUUID();
+    await ask(A, fakeClient([toolUse('create_appointment', args), text('confirma?')]), { conversationId });
+    const c = fakeClient([toolUse('create_appointment', args), text('ok')]);
+    await ask(A, c, { conversationId });
+    return c;
+  };
   const base = { patientId: patient, startsAt: `${MONDAY}T14:30:00-03:00`, confirmed: true };
 
   const before = (await t.sql('SELECT count(*)::int n FROM appointments'))[0].n;
@@ -183,6 +191,49 @@ test('create_appointment: agenda de verdade, recusa horário ocupado, paciente d
   const asProf = fakeClient([toolUse('create_appointment', { ...base, startsAt: `${MONDAY}T16:00:00-03:00` }), text('ok')]);
   await asReception(asProf);
   assert.match(lastResponse(asProf).error, /indisponível/, 'profissional não tem a ferramenta de agendar');
+});
+
+test('confirmação humana: ação da Julia não roda na mesma rodada em que foi proposta, nem com dados trocados', async () => {
+  const patient = '20000000-0000-0000-0000-000000000001';
+  const args = { patientId: patient, startsAt: `${MONDAY}T14:30:00-03:00`, confirmed: true };
+  const count = async () => (await t.sql('SELECT count(*)::int n FROM appointments'))[0].n;
+  const n0 = await count();
+  const conversationId = randomUUID();
+  // injeção: o modelo propõe e chama de novo na mesma requisição
+  const same = fakeClient([toolUse('create_appointment', args), toolUse('create_appointment', args), text('feito')]);
+  await ask(A, same, { conversationId });
+  assert.match(lastResponse(same).needsConfirmation, /NÃO executada/);
+  assert.equal(await count(), n0, 'nada criado sem nova mensagem da pessoa');
+  // próxima mensagem, mas com outro horário: não vale a proposta anterior
+  const other = fakeClient([toolUse('create_appointment', { ...args, startsAt: `${MONDAY}T15:00:00-03:00` }), text('x')]);
+  await ask(A, other, { conversationId });
+  assert.ok(lastResponse(other).needsConfirmation);
+  assert.equal(await count(), n0);
+  // outro usuário não confirma proposta alheia (histórico é por usuário)
+  const intruder = fakeClient([toolUse('create_appointment', args), text('x')]);
+  await assert.rejects(asReception(intruder, { conversationId }), { error: 'conversation_not_found' });
+  assert.equal(intruder.calls.length, 0);
+  assert.equal(await count(), n0);
+  // a proposta mais antiga (14:30) expirou: só vale a da rodada imediatamente anterior
+  const stale = fakeClient([toolUse('create_appointment', args), text('x')]);
+  await ask(A, stale, { conversationId: conversationId.toUpperCase() }); // id em maiúsculas é a mesma conversa
+  assert.ok(lastResponse(stale).needsConfirmation, 'proposta de duas mensagens atrás não executa');
+  assert.equal(await count(), n0);
+  // mesma ação na mensagem seguinte do mesmo usuário: executa uma vez
+  const ok = fakeClient([toolUse('create_appointment', args), text('ok')]);
+  await ask(A, ok, { conversationId });
+  assert.equal(lastResponse(ok).result.ok, true);
+  assert.equal(await count(), n0 + 1);
+  // replay: repetir a ação em mensagem posterior não reaproveita a confirmação já usada
+  const again = fakeClient([toolUse('cancel_appointment', { appointmentId: lastResponse(ok).result.appointmentId, confirmed: true }), text('x')]);
+  await ask(A, again, { conversationId });
+  assert.ok(lastResponse(again).needsConfirmation);
+  const replay = fakeClient([toolUse('create_appointment', args), text('x')]);
+  await ask(A, replay, { conversationId });
+  assert.ok(lastResponse(replay).needsConfirmation, 'confirmação usada não vale de novo');
+  assert.equal(await count(), n0 + 1);
+  const hist = await t.sql(`SELECT content FROM sara_messages WHERE conversation_id=$1`, [conversationId]);
+  assert.ok(hist.every((r) => !String(r.content).includes(patient)), 'proposta pendente fica cifrada no histórico');
 });
 
 test('orçamento mensal de tokens: bloqueia a clínica ao estourar, sem chamar o provedor', async () => {
@@ -242,4 +293,121 @@ test('histórico da Julia fica cifrado no banco e ainda é reaproveitado (audito
   const c2 = fakeClient([text('ok')]);
   await ask(A, c2, { conversationId: r1.conversationId });
   assert.equal(c2.calls[0].contents[1].parts[0].text, 'Alergia a dipirona registrada no prontuário');
+});
+
+test('histórico antigo em claro: script cifra tudo, apaga resultado de ferramenta e a conversa continua (S-03)', async () => {
+  const { sealLegacyHistory } = await import('../src/sara.js');
+  const u = await userOf(A);
+  const conv = randomUUID();
+  await t.sql(`INSERT INTO sara_messages (clinic_id,user_id,conversation_id,role,content) VALUES
+    ($1,$2,$3,'user',to_jsonb('prontuário da Maria?'::text)),
+    ($1,$2,$3,'assistant',$4::jsonb),
+    ($1,$2,$3,'user',$5::jsonb),
+    ($1,$2,$3,'assistant',$6::jsonb)`, [A, u.id, conv,
+    JSON.stringify([{ functionCall: { name: 'patient_records', args: {} } }]),
+    JSON.stringify([{ functionResponse: { name: 'patient_records', response: { result: { cpf: '529.982.247-25', alergia: 'dipirona' } } } }]),
+    JSON.stringify([{ text: 'Alergia registrada: dipirona' }])]);
+  assert.deepEqual(await sealLegacyHistory({ batch: 2, dryRun: true }), { scanned: 4, sealed: 4, alreadySealed: 0, failed: 0 }, 'dry-run conta e não grava');
+  assert.equal((await t.sql(`SELECT count(*)::int n FROM sara_messages WHERE conversation_id=$1 AND content::text LIKE '"v1:%'`, [conv]))[0].n, 0);
+  assert.deepEqual(await sealLegacyHistory({ batch: 2 }), { scanned: 4, sealed: 4, alreadySealed: 0, failed: 0 });
+  assert.deepEqual(await sealLegacyHistory(), { scanned: 4, sealed: 0, alreadySealed: 4, failed: 0 }, 'idempotente');
+  const raw = JSON.stringify(await t.sql('SELECT content FROM sara_messages WHERE conversation_id=$1', [conv]));
+  assert.ok(!/dipirona|529|Maria/.test(raw), 'nada em claro');
+  const c = fakeClient([text('ok')]);
+  await ask(A, c, { conversationId: conv, message: 'e agora?' });
+  const sent = JSON.stringify(c.calls[0].contents);
+  assert.match(sent, /prontuário da Maria\?/); assert.match(sent, /Alergia registrada: dipirona/);
+  assert.ok(!sent.includes('529.982.247-25'), 'resultado de ferramenta antigo não volta ao modelo');
+});
+
+// ---------- Rodada final: selagem verificável, persistência da conversa, reenvio e isolamento ----------
+test('script de selagem: verificação conta claro/cifrado/ilegível; "v1:" digitado por pessoa em claro é selado; chave errada nunca grava', async () => {
+  const { sealLegacyHistory, verifySealedHistory } = await import('../src/sara.js');
+  const u = await userOf(A);
+  const conv = randomUUID();
+  await t.sql(`INSERT INTO sara_messages (clinic_id,user_id,conversation_id,role,content) VALUES
+    ($1,$2,$3,'user',to_jsonb('v1:isto é só um texto que a pessoa digitou'::text)),
+    ($1,$2,$3,'assistant',$4::jsonb)`, [A, u.id, conv, JSON.stringify([{ text: 'resposta antiga' }])]);
+  await ask(A, fakeClient([text('nova')]), { conversationId: randomUUID() }); // uma conversa nova, já cifrada
+  assert.deepEqual(await verifySealedHistory(), { total: 4, sealed: 2, plaintext: 2, unreadable: 0 });
+  assert.equal((await sealLegacyHistory()).sealed, 2);
+  assert.deepEqual(await verifySealedHistory(), { total: 4, sealed: 4, plaintext: 0, unreadable: 0 });
+  const h = await t.call('GET', '/sara/history', { token: await t.tokenFor('gestor@demo.test') });
+  assert.equal(h.status, 200);
+  // chave trocada: tudo vira "ilegível", nada é regravado
+  const keep = process.env.ENCRYPTION_KEY;
+  process.env.ENCRYPTION_KEY = 'cd'.repeat(32);
+  try {
+    const v = await verifySealedHistory();
+    assert.equal(v.unreadable, 4);
+    const before = JSON.stringify(await t.sql('SELECT id, content FROM sara_messages ORDER BY id'));
+    await sealLegacyHistory();
+    assert.equal(JSON.stringify(await t.sql('SELECT id, content FROM sara_messages ORDER BY id')), before, 'dado ilegível nunca é regravado');
+  } finally { process.env.ENCRYPTION_KEY = keep; }
+});
+
+test('conversa persiste: GET /sara/history devolve só texto, na ordem, e só da própria pessoa (B-JULIA-persistência)', async () => {
+  const owner = await t.tokenFor('gestor@demo.test'), rec = await t.tokenFor('recepcao@demo.test'), ownerB = await t.tokenFor('b@demo.test');
+  assert.deepEqual((await t.call('GET', '/sara/history', { token: owner })).json, { conversationId: null, messages: [] });
+  assert.equal((await t.call('GET', '/sara/history')).status, 401);
+  const real = globalThis.fetch;
+  let n = 0;
+  globalThis.fetch = async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: `resposta ${++n}` }] } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  try {
+    const a = await t.call('POST', '/sara/chat', { token: owner, body: { message: 'primeira' } });
+    const b = await t.call('POST', '/sara/chat', { token: owner, body: { message: 'segunda', conversationId: a.json.conversationId } });
+    assert.equal(b.json.conversationId, a.json.conversationId);
+    const h = await t.call('GET', '/sara/history', { token: owner });
+    assert.equal(h.json.conversationId, a.json.conversationId);
+    assert.deepEqual(h.json.messages, [{ role: 'user', text: 'primeira' }, { role: 'sara', text: 'resposta 1' }, { role: 'user', text: 'segunda' }, { role: 'sara', text: 'resposta 2' }]);
+    assert.deepEqual((await t.call('GET', '/sara/history', { token: rec })).json.messages, [], 'colega da mesma clínica não vê');
+    assert.deepEqual((await t.call('GET', '/sara/history', { token: ownerB })).json.messages, [], 'outra clínica não vê');
+    // usar o id de conversa de outra pessoa/clínica: 404, sem gravar nada nela
+    const steal = await t.call('POST', '/sara/chat', { token: ownerB, body: { message: 'oi', conversationId: a.json.conversationId } });
+    assert.equal(steal.status, 404);
+    const own = (await t.sql('SELECT count(*)::int n FROM sara_messages WHERE conversation_id=$1', [a.json.conversationId]))[0].n;
+    assert.equal(own, 4);
+    // no banco nada em claro
+    assert.ok(!JSON.stringify(await t.sql('SELECT content FROM sara_messages')).includes('primeira'));
+    // conversa parada há mais de 12 h não reabre
+    await t.sql(`UPDATE sara_messages SET created_at = now() - interval '13 hours'`);
+    assert.deepEqual((await t.call('GET', '/sara/history', { token: owner })).json.messages, []);
+  } finally { globalThis.fetch = real; }
+});
+
+test('reenvio da mesma mensagem (messageId) devolve a resposta já dada, sem gastar IA nem duplicar; ao mesmo tempo, 409', async () => {
+  const owner = await t.tokenFor('gestor@demo.test');
+  const real = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; await new Promise((r) => setTimeout(r, 60)); return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'ok único' }] } }] }), { status: 200, headers: { 'content-type': 'application/json' } }); };
+  try {
+    const conversationId = randomUUID(), messageId = randomUUID();
+    const body = { message: 'oi', conversationId, messageId };
+    const [x, y] = await Promise.all([t.call('POST', '/sara/chat', { token: owner, body }), t.call('POST', '/sara/chat', { token: owner, body })]);
+    assert.deepEqual([x.status, y.status].sort(), [200, 409], 'simultâneo: um processa, o outro espera');
+    assert.equal(calls, 1);
+    const again = await t.call('POST', '/sara/chat', { token: owner, body });
+    assert.equal(again.status, 200); assert.equal(again.json.reply, 'ok único'); assert.equal(again.json.duplicate, true);
+    assert.equal(calls, 1, 'não chamou a IA de novo');
+    assert.equal((await t.sql(`SELECT count(*)::int n FROM sara_messages WHERE conversation_id=$1`, [conversationId]))[0].n, 2, 'uma pergunta e uma resposta');
+  } finally { globalThis.fetch = real; }
+});
+
+test('script seal-sara-history.js: sem flag só simula; --apply cifra e confere; roda de novo sem mexer (banco isolado)', async () => {
+  const { main } = await import('../scripts/seal-sara-history.js');
+  const run = async (...args) => { let out = ''; const code = await main(args, (...a) => { out += `${a.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(' ')}\n`; }); return { code, out }; };
+  const u = await userOf(A);
+  const conv = randomUUID();
+  await t.sql(`INSERT INTO sara_messages (clinic_id,user_id,conversation_id,role,content) VALUES ($1,$2,$3,'user',to_jsonb('CPF 529.982.247-25'::text))`, [A, u.id, conv]);
+  const dry = await run();
+  assert.equal(dry.code, 0, dry.out); assert.match(dry.out, /Simulação/); assert.match(dry.out, /"plaintext":1/);
+  assert.match((await t.sql('SELECT content::text c FROM sara_messages WHERE conversation_id=$1', [conv]))[0].c, /529/, 'simulação não gravou');
+  const applied = await run('--apply');
+  assert.equal(applied.code, 0); assert.match(applied.out, /Depois:.*"plaintext":0/);
+  assert.ok(!(await t.sql('SELECT content::text c FROM sara_messages WHERE conversation_id=$1', [conv]))[0].c.includes('529'));
+  const again = await run('--apply');
+  assert.equal(again.code, 0); assert.match(again.out, /"sealed":0,"alreadySealed"/);
+  // chave errada: aborta com código 1 e não grava
+  const keep = process.env.ENCRYPTION_KEY; process.env.ENCRYPTION_KEY = 'cd'.repeat(32);
+  try { const bad = await run('--apply'); assert.equal(bad.code, 1); assert.match(bad.out, /ilegíveis/); } finally { process.env.ENCRYPTION_KEY = keep; }
 });

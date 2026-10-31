@@ -1,6 +1,7 @@
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { setup, A, B } from './helpers.js';
+import { randomUUID } from 'node:crypto';
 
 let t, askSara;
 before(async () => { t = await setup(); ({ askSara } = await import('../src/sara.js')); });
@@ -20,7 +21,13 @@ async function run(email, name, args = {}, clinicId = A) {
     return calls.length === 1 ? { parts: [{ functionCall: { name, args } }], usage } : { parts: [{ text: 'ok' }], usage };
   } };
   const [u] = await t.sql('SELECT id, role FROM users WHERE email=$1', [email]);
-  await askSara({ clinicId, userId: u.id, role: u.role, ip: '1.2.3.4', message: 'pergunta', client });
+  const conversationId = randomUUID();
+  // Ações que mudam a agenda exigem confirmação humana: uma rodada propõe, a mensagem seguinte executa.
+  if (/^(create|reschedule|cancel)_appointment$/.test(name)) {
+    const propose = { generate: async () => (propose.n = (propose.n ?? 0) + 1) === 1 ? { parts: [{ functionCall: { name, args } }], usage } : { parts: [{ text: 'confirma?' }], usage } };
+    await askSara({ clinicId, userId: u.id, role: u.role, ip: '1.2.3.4', message: 'pergunta', conversationId, client: propose });
+  }
+  await askSara({ clinicId, userId: u.id, role: u.role, ip: '1.2.3.4', message: 'sim', conversationId, client });
   return { res: calls[1].contents.at(-1).parts[0].functionResponse.response, declared: calls[0].tools.map((x) => x.name) };
 }
 const setRole = (email, role) => t.sql('UPDATE users SET role=$2 WHERE email=$1', [email, role]);

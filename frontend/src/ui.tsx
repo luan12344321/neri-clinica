@@ -24,19 +24,36 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 // ---------- Janela de formulário (sobe de baixo no celular, centralizada no desktop) ----------
 export function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   const ref = useRef<HTMLElement>(null);
+  // onClose costuma ser uma função nova a cada desenho da tela de trás (ex.: a lista do WhatsApp recarrega a cada minuto);
+  // guardado em ref, o efeito roda só ao abrir e o foco não volta ao primeiro campo no meio da digitação.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const opener = document.activeElement as HTMLElement | null;
+    const onKey = (e: KeyboardEvent) => {
+      // janela sobre janela (ex.: Agendar retorno sobre Atendimento): só a de cima responde a Esc e Tab
+      const open = document.querySelectorAll('.sheet');
+      if (open[open.length - 1] !== ref.current) return;
+      if (e.key === 'Escape') { closeRef.current(); return; }
+      if (e.key !== 'Tab' || !ref.current) return; // Tab circula dentro da janela (aria-modal), sem cair na tela de trás
+      const f = [...ref.current.querySelectorAll<HTMLElement>('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')];
+      const first = f[0], last = f[f.length - 1];
+      if (!first || !last) return;
+      if (!ref.current.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+      else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
     addEventListener('keydown', onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    ref.current?.querySelector<HTMLElement>('input, select, textarea')?.focus();
-    return () => { removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
-  }, [onClose]);
+    (ref.current?.querySelector<HTMLElement>('input, select, textarea') ?? ref.current)?.focus(); // janela sem campo: o foco vai para ela, não fica no botão de trás
+    return () => { removeEventListener('keydown', onKey); document.body.style.overflow = prev; if (opener?.isConnected) opener.focus(); };
+  }, []);
   // Renderiza direto no <body>: dentro de um cartão com animação/transform o "fixed" prende o formulário ao cartão (o botão ficava atrás de outros cartões e da barra de baixo).
   return createPortal(
     <div className="sheet-wrap">
       <div className="scrim" onClick={onClose} />
-      <section ref={ref} className="sheet" role="dialog" aria-modal="true" aria-label={title}>
+      <section ref={ref} className="sheet" tabIndex={-1} role="dialog" aria-modal="true" aria-label={title}>
         <header><h2>{title}</h2><button className="icon-btn" aria-label="Fechar" onClick={onClose}><Icon name="close" /></button></header>
         {children}
       </section>
@@ -125,7 +142,7 @@ export function ConfirmButton({ label, confirm, text, onConfirm, disabled }: { l
   return (
     <div role="group" aria-label={label}>
       <p className="muted">{text}</p>
-      <div className="actions"><button ref={yes} className="ghost danger" disabled={disabled} onClick={() => { setAsk(false); onConfirm(); }}>{confirm}</button><button className="ghost" onClick={() => setAsk(false)}>Cancelar</button></div>
+      <div className="actions"><button ref={yes} className="ghost danger" disabled={disabled} onClick={() => { setAsk(false); onConfirm(); }}>{confirm}</button><button className="ghost" onClick={() => setAsk(false)}>Voltar</button></div>
     </div>
   );
 }

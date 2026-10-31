@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Icon } from './Icon';
 import { dayIntervals, fromMin, type Hours } from './hours';
-import { Avatar, Empty, Sheet } from './ui';
+import { ApiError, api } from './api';
+import { errText } from './Cadastros';
+import { Avatar, ConfirmButton, Empty, Sheet, useToast } from './ui';
 
 export const ageOf = (birth?: string | null) => {
   if (!birth) return null;
@@ -97,10 +99,19 @@ export function DayTimeline({ appts, hours, onOpen, onBook, onSeeAll }: { appts:
 }
 
 // Detalhes de um atendimento (toque num bloco da linha do tempo).
-export function ApptSheet({ appt, clinical, busy, onClose, onStart, onChart, onComplete, onMove }: {
+export function ApptSheet({ appt, clinical, busy, onClose, onStart, onChart, onComplete, onMove, onChanged }: {
   appt: Appt; clinical: boolean; busy: boolean; onClose: () => void;
-  onStart: () => void; onChart: () => void; onComplete: () => void; onMove: () => void;
+  onStart: () => void; onChart: () => void; onComplete: () => void; onMove: () => void; onChanged: () => void;
 }) {
+  const toast = useToast();
+  const [saving, setSaving] = useState(false);
+  // cancelar / faltou / confirmar: libera o horário (o servidor só conta conflito com agendado/confirmado/concluído)
+  async function setStatus(status: 'canceled' | 'no_show' | 'confirmed', done: string) {
+    setSaving(true);
+    try { await api(`/appointments/${appt.id}`, { method: 'PATCH', json: { status } }); toast(done); onChanged(); }
+    catch (x) { toast(x instanceof ApiError && x.status === 404 ? 'Este atendimento já foi encerrado por outra pessoa. Atualize a tela.' : errText(x)); setSaving(false); }
+  }
+  const started = new Date(appt.starts_at).getTime() <= Date.now();
   const age = ageOf(appt.birth_date);
   const s = new Date(appt.starts_at), e = appt.ends_at ? new Date(appt.ends_at) : null;
   // concluído, faltou ou cancelado: estado final, sem concluir/reagendar (o servidor recusaria com 409)
@@ -119,40 +130,12 @@ export function ApptSheet({ appt, clinical, busy, onClose, onStart, onChart, onC
         {clinical && <button className="ghost" onClick={onChart}>Ver prontuário</button>}
         {!done && (clinical ? <button className="ghost" onClick={onComplete}>Concluir atendimento</button> : <button className="primary" disabled={busy} onClick={onComplete}>Concluir atendimento</button>)}
         {!done && <button className="ghost" onClick={onMove}>Reagendar</button>}
+        {!done && appt.status === 'scheduled' && !started && <button className="ghost" disabled={saving} onClick={() => setStatus('confirmed', 'Presença confirmada')}>Marcar como confirmado</button>}
+        {!done && started && <ConfirmButton label="Paciente faltou" confirm="Confirmar falta" disabled={saving}
+          text="O atendimento fica como falta e não gera cobrança." onConfirm={() => setStatus('no_show', 'Falta registrada')} />}
+        {!done && <ConfirmButton label="Cancelar atendimento" confirm="Confirmar cancelamento" disabled={saving}
+          text="O horário fica livre para outro paciente e não gera cobrança." onConfirm={() => setStatus('canceled', 'Atendimento cancelado')} />}
       </div>
     </Sheet>
-  );
-}
-
-// Fila do dia: um cartão por atendimento, em ordem de horário (sem sobreposição). O próximo fica destacado,
-// concluídos esmaecidos com check e atrasados em terracota. Toque abre o atendimento.
-export function DayStrip({ appts, onOpen }: { appts: Appt[]; onOpen: (a: Appt) => void }) {
-  const list = appts.filter((a) => a.status !== 'canceled').sort((x, y) => x.starts_at.localeCompare(y.starts_at));
-  if (!list.length) return null;
-  const nowMin = mins(new Date());
-  const endMin = (a: Appt) => mins(new Date(a.ends_at ?? a.starts_at));
-  const nextId = list.find((a) => a.status !== 'done' && endMin(a) >= nowMin)?.id;
-  const open = list.filter((a) => a.status !== 'done').length;
-  return (
-    <section className="day-strip" aria-label="Atendimentos de hoje">
-      <div className="ds-head"><b>Hoje</b><span>{list.length} {list.length === 1 ? 'atendimento' : 'atendimentos'} · {open} {open === 1 ? 'por fazer' : 'por fazer'}</span></div>
-      <ul className="ds-list">
-        {list.map((a) => {
-          const done = a.status === 'done';
-          const late = isLate(a);
-          const cls = ['ds-card', done ? 'done' : '', late ? 'late' : '', a.id === nextId ? 'next' : ''].filter(Boolean).join(' ');
-          return (
-            <li key={a.id}>
-              <button type="button" className={cls} onClick={() => onOpen(a)}>
-                <span className="ds-time">{clock(new Date(a.starts_at))}{a.ends_at ? `–${clock(new Date(a.ends_at))}` : ''}</span>
-                <b>{a.patient.split(/\s+/)[0]}</b>
-                <small>{a.procedure ?? 'Sem procedimento'}</small>
-                <em>{done ? 'Concluído' : late ? 'Atrasado' : a.id === nextId ? 'Próximo' : 'Agendado'}</em>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
   );
 }

@@ -261,6 +261,25 @@ test('orçamento esgotado, flood e falha do modelo: resposta curta, equipe avisa
   assert.equal((await rows('SELECT handoff_reason FROM wa_contacts WHERE contact=$1', [KNOWN]))[0].handoff_reason, 'erro técnico');
 });
 
+test('teto diário de IA no WhatsApp: um contato anônimo não queima o mês nem para a Julia interna', async () => {
+  await configure();
+  const SPAM = '5511888880000';
+  await rows(`INSERT INTO wa_messages (clinic_id, contact, direction, body, tokens_in, tokens_out) VALUES ($1,$2,'out','x',50000,10000)`, [A, SPAM]);
+  gemini.push(txt('não deveria chamar'));
+  await say(SPAM, 'oi');
+  assert.equal(geminiBodies.length, 0, 'contato no teto diário: modelo não é chamado');
+  assert.equal((await rows('SELECT handoff_reason FROM wa_contacts WHERE contact=$1', [SPAM]))[0].handoff_reason, 'limite diário de IA no WhatsApp');
+  // outro contato da mesma clínica segue atendido; o teto da clínica corta todos
+  gemini.length = 0; gemini.push(txt('Oi!'));
+  await say(KNOWN, 'oi');
+  assert.equal(geminiBodies.length, 1, 'outro contato continua com a Julia');
+  const { checkWhatsAppBudget } = await import('../src/sara_client.js');
+  const { checkBudget } = await import('../src/sara.js');
+  process.env.GEMINI_WA_CLINIC_DAILY_TOKENS = '1000';
+  try { await assert.rejects(checkWhatsAppBudget(A, KNOWN), /whatsapp clínica/); } finally { delete process.env.GEMINI_WA_CLINIC_DAILY_TOKENS; }
+  await checkBudget(A); // a Julia interna (orçamento mensal) não foi afetada
+});
+
 test('áudio e imagem não quebram; resposta longa vira até 3 mensagens curtas', async () => {
   await configure();
   gemini.push(txt('Oi! Eu ainda não consigo ouvir áudio.\n\nPode me escrever o que precisa?\n\nAssim eu te ajudo rapidinho.\n\nCombinado?'));

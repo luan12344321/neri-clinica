@@ -19,7 +19,7 @@ export default defineConfig({
         start_url: '/',
         scope: '/',
         categories: ['business', 'medical', 'productivity'],
-        background_color: '#0d0d0d',
+        background_color: '#f2f0e8', // fundo bege do app (index.html), não preto
         theme_color: '#163b2d',
         icons: [
           { src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },

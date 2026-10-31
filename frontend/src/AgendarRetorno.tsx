@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
-import { ApiError, api } from './api';
+import { ApiError, api, dayISO } from './api';
 import { Icon } from './Icon';
 import { Sheet, useToast } from './ui';
 
 // Botão "Agendar agora" de um retorno sugerido: escolhe o dia, vê os horários livres e confirma.
-const todayISO = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
 
 export function AgendarRetornoButton({ returnId, patientName, onDone }: { returnId: string; patientName: string; onDone?: () => void }) {
   const [open, setOpen] = useState(false);
@@ -20,7 +19,7 @@ export function AgendarRetornoButton({ returnId, patientName, onDone }: { return
 
 function AgendarSheet({ returnId, patientName, onClose, onDone }: { returnId: string; patientName: string; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
-  const [date, setDate] = useState(todayISO());
+  const [date, setDate] = useState(dayISO());
   const [slots, setSlots] = useState<string[] | null>(null);
   const [slot, setSlot] = useState('');
   const [loadErr, setLoadErr] = useState('');
@@ -50,7 +49,7 @@ function AgendarSheet({ returnId, patientName, onClose, onDone }: { returnId: st
     <Sheet title={`Agendar retorno: ${patientName}`} onClose={onClose}>
       <div className="form">
         <label>Dia
-          <input type="date" min={todayISO()} value={date} onChange={(e) => e.target.value && setDate(e.target.value)} />
+          <input type="date" min={dayISO()} value={date} onChange={(e) => e.target.value && setDate(e.target.value)} />
         </label>
         <div role="group" aria-label="Horários livres" aria-busy={slots === null && !loadErr}>
           {loadErr && <p role="alert" className="err">{loadErr}</p>}

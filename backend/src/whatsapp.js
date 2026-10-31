@@ -255,7 +255,8 @@ export default async function whatsapp(app) {
       if (!r.texts.length) await handoff(r.handoff ?? 'resposta vazia');
     } catch (e) {
       req.log.error({ err: e?.name, status: e?.status }, 'whatsapp answer');
-      await handoff(e?.name === 'BudgetError' ? 'limite mensal de IA' : 'erro técnico').catch(() => {});
+      await handoff(e?.name !== 'BudgetError' ? 'erro técnico'
+        : String(e.scope).startsWith('whatsapp') ? 'limite diário de IA no WhatsApp' : 'limite mensal de IA').catch(() => {});
       try { await record(await sendText(clinic, contact, FALLBACK), FALLBACK, null); } catch { /* sem como avisar: a conversa fica na lista da equipe */ }
     }
   }
