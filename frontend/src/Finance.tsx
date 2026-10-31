@@ -14,7 +14,7 @@ export type Bank = {
   isDefault: boolean; active: boolean; balance: number; openingBalance: number; pixKeyType: string | null; pixKeyMasked: string | null;
 };
 type Tx = { id: string; description: string; amount: string; due_date: string; patient?: string | null; procedure?: string | null };
-type Recent = { id: string; type: 'income' | 'expense'; description: string; amount: number; status: 'pending' | 'paid'; due_date: string; paid_at: string | null; category: string | null; bank: string | null };
+type Recent = { id: string; type: 'income' | 'expense'; description: string; amount: number; status: 'pending' | 'paid' | 'refunded'; due_date: string; paid_at: string | null; category: string | null; bank: string | null; refund_reason?: string | null };
 
 const KIND: Record<Bank['kind'], string> = { checking: 'Conta corrente', savings: 'Poupança', payment: 'Conta de pagamento', cash: 'Caixa (dinheiro)' };
 const INSTITUTIONS = ['Nubank', 'Itaú', 'Bradesco', 'Banco do Brasil', 'Caixa', 'Santander', 'Inter', 'C6 Bank', 'Sicoob', 'Sicredi', 'Mercado Pago', 'PagBank', 'Stone', 'Cora', 'Dinheiro', 'Outro'];
@@ -25,9 +25,11 @@ const Status = ({ error, loading }: { error: string; loading: boolean }) =>
   error ? <p role="alert" className="err">{error}</p> : loading ? <ListSkeleton rows={3} /> : null;
 
 // ---------- Últimas movimentações (usada também no Início) ----------
-export function RecentTransactions({ limit = 6, reloadKey, onSeeAll }: { limit?: number; reloadKey?: number; onSeeAll?: () => void }) {
+export function RecentTransactions({ limit = 6, reloadKey, onSeeAll, onRefunded }: { limit?: number; reloadKey?: number; onSeeAll?: () => void; onRefunded?: () => void }) {
   const l = useLoad<Recent[]>(`/finance/transactions?limit=${limit}&k=${reloadKey ?? 0}`);
   const { hidden } = useHideValues();
+  const [refund, setRefund] = useState<Recent | null>(null);
+  const toast = useToast();
   return (
     <section className="card list-card">
       <div className="between pad-h"><h2>Últimas movimentações</h2>{onSeeAll && <button className="link" onClick={onSeeAll}>Ver tudo</button>}</div>
@@ -37,15 +39,29 @@ export function RecentTransactions({ limit = 6, reloadKey, onSeeAll }: { limit?:
         <li key={t.id}>
           <div className="row-btn static">
             <span className={`q-ico ${t.type === 'expense' ? 'out' : ''}`}><Icon name={t.type === 'income' ? 'receive' : 'pay'} size={20} /></span>
-            <span className="grow"><b>{t.description}</b><span className="muted">{[t.category, t.bank].filter(Boolean).join(' · ') || (t.paid_at ? dateBR(t.paid_at) : `vence ${dateBR(t.due_date)}`)}</span></span>
+            <span className="grow"><b>{t.description}</b><span className="muted">{t.status === 'refunded' ? `Estornado${t.refund_reason ? `: ${t.refund_reason}` : ''}` : [t.category, t.bank].filter(Boolean).join(' · ') || (t.paid_at ? dateBR(t.paid_at) : `vence ${dateBR(t.due_date)}`)}</span></span>
             <span className="tx-right">
-              <b className={t.type === 'expense' ? 'neg' : 'pos'}>{mask(`${t.type === 'expense' ? '−' : '+'} ${brl(t.amount)}`, hidden)}</b>
-              <span className={`pill ${t.status === 'paid' ? 'ok' : 'warn'}`}>{t.status === 'paid' ? (t.type === 'income' ? 'Recebido' : 'Pago') : 'Pendente'}</span>
+              <b className={t.status === 'refunded' ? 'muted' : t.type === 'expense' ? 'neg' : 'pos'} style={t.status === 'refunded' ? { textDecoration: 'line-through' } : undefined}>{mask(`${t.type === 'expense' ? '−' : '+'} ${brl(t.amount)}`, hidden)}</b>
+              <span className={`pill ${t.status === 'paid' ? 'ok' : 'warn'}`}>{t.status === 'refunded' ? 'Estornado' : t.status === 'paid' ? (t.type === 'income' ? 'Recebido' : 'Pago') : 'Pendente'}</span>
+              {onRefunded && t.status === 'paid' && <button className="link" onClick={() => setRefund(t)}>Estornar</button>}
             </span>
           </div>
         </li>
       ))}</ul>
+      {refund && <RefundSheet tx={refund} onClose={() => setRefund(null)} onDone={() => { setRefund(null); onRefunded?.(); toast('Estorno registrado'); }} />}
     </section>
+  );
+}
+
+// Estorno de um valor já pago/recebido: sai dos totais e do saldo da conta e fica no histórico com o motivo.
+function RefundSheet({ tx, onClose, onDone }: { tx: Recent; onClose: () => void; onDone: () => void }) {
+  return (
+    <Sheet title="Estornar" onClose={onClose}>
+      <div className="settle-head"><b>{tx.description}</b><strong>{brl(tx.amount)}</strong></div>
+      <p className="muted">O valor deixa os totais e o saldo da conta, e o registro fica no histórico como estornado. O sistema só anota: devolva o dinheiro ao paciente por fora (Pix, maquininha). O estoque usado no atendimento não volta.</p>
+      <AddForm label="Confirmar estorno" fields={[{ name: 'reason', label: 'Motivo do estorno', required: true }]}
+        onSubmit={async (v) => { await api(`/finance/transactions/${tx.id}/refund`, { method: 'POST', json: { reason: v.reason } }); onDone(); }} />
+    </Sheet>
   );
 }
 
@@ -81,6 +97,7 @@ export function Finance({ initialTab = 'resumo', onTab }: { initialTab?: FinTab;
 // ---------- Resumo ----------
 function Summary({ sum, flow, banks, recv, pay, bump, goTab }: { sum: ReturnType<typeof useLoad<any>>; flow: ReturnType<typeof useLoad<{ month: string; income: number; expense: number }[]>>;
   banks: Bank[] | null; recv: Tx[] | null; pay: Tx[] | null; bump: number; goTab: (t: FinTab) => void }) {
+  const [refunds, setRefunds] = useState(0);
   const { hidden } = useHideValues();
   const s = sum.data;
   const total = (items: Tx[] | null) => (items ?? []).reduce((a, t) => a + Number(t.amount), 0);
@@ -142,7 +159,7 @@ function Summary({ sum, flow, banks, recv, pay, bump, goTab }: { sum: ReturnType
               </>
             )}
           </section>
-          <RecentTransactions reloadKey={bump} onSeeAll={() => goTab('contas')} />
+          <RecentTransactions reloadKey={bump + refunds} onSeeAll={() => goTab('contas')} onRefunded={() => { setRefunds((n) => n + 1); sum.reload(); }} />
         </>
       )}
     </>
@@ -206,7 +223,14 @@ function EditTransaction({ tx, onClose, onDone }: { tx: Tx; onClose: () => void;
         { name: 'description', label: 'Descrição', def: tx.description, required: true },
         { name: 'amount', label: 'Valor (R$)', type: 'number', step: '0.01', def: String(Number(tx.amount)), required: true },
         { name: 'dueDate', label: 'Vencimento', type: 'date', def: String(tx.due_date).slice(0, 10), required: true },
-      ]} onSubmit={async (v) => { await api(`/finance/transactions/${tx.id}`, { method: 'PATCH', json: v }); onDone('Conta atualizada'); }} />
+        { name: 'discount', label: 'Dar desconto (R$, abate do valor acima)', type: 'number', step: '0.01' },
+      ]} onSubmit={async (v) => {
+        // desconto e novo valor não vão juntos: com desconto, o valor atual é mantido e o servidor abate
+        const { discount, amount, ...rest } = v;
+        if (discount && Number(amount) !== Number(tx.amount)) throw new ApiError(400, 'Altere o valor ou dê o desconto, não os dois de uma vez.');
+        await api(`/finance/transactions/${tx.id}`, { method: 'PATCH', json: discount ? { ...rest, discount } : v });
+        onDone(discount ? 'Desconto aplicado' : 'Conta atualizada');
+      }} />
       <ConfirmButton label="Cancelar esta conta" confirm="Sim, cancelar" text="Ela sai de “a receber/a pagar” e dos totais. O registro fica no histórico como cancelado."
         onConfirm={async () => { await api(`/finance/transactions/${tx.id}`, { method: 'DELETE' }); onDone('Conta cancelada'); }} />
     </Sheet>
@@ -345,7 +369,9 @@ function NewTransaction({ banks, onClose, onDone }: { banks: Bank[]; onClose: ()
     { name: 'categoryId', label: 'Categoria', type: 'select', required: true, options: cats.data?.map((c) => ({ value: c.id, label: `${c.kind === 'income' ? 'Receita' : 'Despesa'} · ${c.name}` })) },
     { name: 'description', label: 'Descrição', required: true },
     { name: 'amount', label: 'Valor (R$)', type: 'number', step: '0.01', required: true },
-    { name: 'dueDate', label: 'Vencimento', type: 'date', def: dayISO(), required: true },
+    { name: 'discount', label: 'Desconto (R$, opcional)', type: 'number', step: '0.01' },
+    { name: 'installments', label: 'Parcelas (vazio = à vista; vence todo mês no mesmo dia)', type: 'select', options: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24].map((n) => ({ value: String(n), label: `${n}x` })) },
+    { name: 'dueDate', label: 'Vencimento (1ª parcela)', type: 'date', def: dayISO(), required: true },
     { name: 'paid', label: 'Já foi pago/recebido (entra direto no saldo da conta)', type: 'checkbox' },
     { name: 'bankAccountId', label: 'Conta, se já foi pago (vazio = conta padrão)', type: 'select', options: banks.filter((b) => b.active).map((b) => ({ value: b.id, label: b.name })) },
   ];
@@ -354,6 +380,7 @@ function NewTransaction({ banks, onClose, onDone }: { banks: Bank[]; onClose: ()
       <AddForm label="Cadastrar" fields={fields} onSubmit={async (v) => {
         const kind = cats.data?.find((c) => c.id === v.categoryId)?.kind;
         await api('/finance/transactions', { method: 'POST', json: { type: kind, categoryId: v.categoryId, description: v.description, amount: v.amount, competenceDate: v.dueDate, dueDate: v.dueDate,
+          ...(v.discount ? { discount: v.discount } : {}), ...(v.installments ? { installments: Number(v.installments) } : {}),
           paid: !!v.paid, ...(v.paid && v.bankAccountId ? { bankAccountId: v.bankAccountId } : {}) } });
         onDone();
       }} />

@@ -122,8 +122,14 @@ CREATE TABLE transactions (
   competence_date date NOT NULL,             -- regime de competência (DRE)
   due_date date NOT NULL,                    -- vencimento (fluxo de caixa)
   paid_at timestamptz,
-  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','paid','canceled')),
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','paid','canceled','refunded')),
   external_id text,                          -- conciliação bancária
+  discount numeric(12,2) NOT NULL DEFAULT 0, -- desconto já abatido em amount (amount é o valor líquido)
+  installment_group uuid,                    -- parcelas do mesmo lançamento
+  installment_no int,
+  installments_total int,
+  refunded_at timestamptz,
+  refund_reason text,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX ON transactions (clinic_id, competence_date);

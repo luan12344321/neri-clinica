@@ -127,7 +127,7 @@ export async function reportSummary(clinicId, { from, to }, { money = false } = 
   if (money) {
     const [f] = await q(`SELECT coalesce(sum(amount) FILTER (WHERE type='income'),0)::float AS receitas,
                                 coalesce(sum(amount) FILTER (WHERE type='expense'),0)::float AS despesas
-                         FROM transactions WHERE clinic_id=$1 AND status<>'canceled' AND competence_date BETWEEN $2::date AND $3::date`, args);
+                         FROM transactions WHERE clinic_id=$1 AND status NOT IN ('canceled','refunded') AND competence_date BETWEEN $2::date AND $3::date`, args);
     out.financeiro = { ...f, saldo: +(f.receitas - f.despesas).toFixed(2) };
   }
   return out;

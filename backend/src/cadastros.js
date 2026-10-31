@@ -54,10 +54,22 @@ export default async function cadastros(app) {
   });
 
   // ---- Lançamentos (contas a pagar/receber) ----
+  // Parcelas em centavos: a diferença da divisão fica na primeira, então a soma fecha sempre no valor líquido.
+  const splitCents = (totalCents, n) => Array.from({ length: n }, (_, i) => Math.floor(totalCents / n) + (i === 0 ? totalCents % n : 0));
+  // Mesmo dia nos meses seguintes; mês sem esse dia (31 em fevereiro) cai no último dia dele.
+  const addMonths = (iso, m) => {
+    const [y, mo, d] = iso.split('-').map(Number);
+    const last = new Date(Date.UTC(y, mo - 1 + m + 1, 0)).getUTCDate();
+    return new Date(Date.UTC(y, mo - 1 + m, Math.min(d, last))).toISOString().slice(0, 10);
+  };
   app.post('/finance/transactions', write, async (req, reply) => {
+    await ensureSchema();
     const b = z.object({ type: z.enum(['income', 'expense']), categoryId: id, description: z.string().min(2).max(500),
-      amount: z.number().positive(), competenceDate: z.string().date(), dueDate: z.string().date(),
-      paid: z.boolean().default(false), bankAccountId: id.optional() }).parse(req.body);
+      amount: z.number().positive(), discount: z.number().min(0).default(0), installments: z.number().int().min(1).max(24).default(1),
+      competenceDate: z.string().date(), dueDate: z.string().date(),
+      paid: z.boolean().default(false), bankAccountId: id.optional() })
+      .refine((v) => v.discount < v.amount, { message: 'o desconto precisa ser menor que o valor', path: ['discount'] })
+      .refine((v) => !(v.paid && v.installments > 1), { message: 'lançamento já pago não se parcela', path: ['installments'] }).parse(req.body);
     // Lançamento já pago entra na conta escolhida (ou na padrão), como na baixa: sem isso o valor ficava fora de todos os saldos.
     let bankId = null;
     if (b.paid) {
@@ -66,24 +78,54 @@ export default async function cadastros(app) {
       if (b.bankAccountId && !acct) return reply.code(404).send({ error: 'bank account not found' });
       bankId = acct?.id ?? null;
     }
-    const [r] = await q(
-      `INSERT INTO transactions (clinic_id,type,category_id,description,amount,competence_date,due_date,status,paid_at,bank_account_id)
-       SELECT $1,$2,c.id,$4,$5,$6,$7,$8,CASE WHEN $8='paid' THEN now() END,$9::uuid
-       FROM categories c WHERE c.id=$3 AND c.clinic_id=$1 RETURNING *`,
-      [cid(req), b.type, b.categoryId, b.description, b.amount, b.competenceDate, b.dueDate, b.paid ? 'paid' : 'pending', bankId]);
-    return r ? reply.code(201).send(r) : reply.code(404).send({ error: 'category not found' });
+    // amount guardado = valor líquido (já com desconto): resumos, saldos e cobranças seguem somando o que de fato entra.
+    const parts = splitCents(Math.round((b.amount - b.discount) * 100), b.installments);
+    if (parts.some((c) => c < 1)) return reply.code(400).send({ error: 'parcela menor que R$ 0,01' });
+    const n = parts.length, group = n > 1 ? crypto.randomUUID() : null;
+    const discountParts = splitCents(Math.round(b.discount * 100), n);
+    const args = [cid(req), b.type, b.categoryId, b.paid ? 'paid' : 'pending', bankId, group, n > 1 ? n : null];
+    const values = parts.map((c, i) => {
+      const at = args.length;
+      // despesa parcelada compete no mês de cada parcela; receita compete na data do atendimento
+      const comp = b.type === 'expense' && n > 1 ? addMonths(b.competenceDate, i) : b.competenceDate;
+      args.push(n > 1 ? `${b.description} (${i + 1}/${n})` : b.description, c / 100, comp, addMonths(b.dueDate, i), discountParts[i] / 100, n > 1 ? i + 1 : null);
+      return `($${at + 1}::text,$${at + 2}::numeric,$${at + 3}::date,$${at + 4}::date,$${at + 5}::numeric,$${at + 6}::int)`;
+    });
+    const rows = await q(
+      `INSERT INTO transactions (clinic_id,type,category_id,description,amount,competence_date,due_date,status,paid_at,bank_account_id,discount,installment_group,installment_no,installments_total)
+       SELECT $1::uuid,$2::text,c.id,v.d,v.amt,v.comp,v.due,$4::text,CASE WHEN $4='paid' THEN now() END,$5::uuid,v.disc,$6::uuid,v.no,$7::int
+       FROM categories c, (VALUES ${values.join(',')}) AS v(d,amt,comp,due,disc,no)
+       WHERE c.id=$3::uuid AND c.clinic_id=$1::uuid ORDER BY v.due RETURNING *`, args);
+    if (!rows.length) return reply.code(404).send({ error: 'category not found' });
+    return reply.code(201).send(n > 1 ? { installments: rows } : rows[0]);
+  });
+  // Estorno: devolve um lançamento já pago. Sai dos totais e do saldo da conta, mas fica no histórico com data e motivo.
+  // Só registra no sistema: o dinheiro é devolvido ao paciente fora dele (e o estoque consumido não volta).
+  app.post('/finance/transactions/:id/refund', write, async (req, reply) => {
+    await ensureSchema();
+    const { id: tid } = z.object({ id }).parse(req.params);
+    const b = z.object({ reason: z.string().trim().min(3).max(300) }).parse(req.body ?? {});
+    const [r] = await q(`UPDATE transactions SET status='refunded', refunded_at=now(), refund_reason=$3
+                         WHERE id=$1 AND clinic_id=$2 AND status='paid' RETURNING *`, [tid, cid(req), b.reason]);
+    if (!r) return reply.code(404).send({ error: 'not found or not paid' });
+    await audit(auditCtx(req), 'finance.refund', 'transaction', tid);
+    return r;
   });
   // Corrige um lançamento ainda pendente. O que já foi pago não se edita (o saldo da conta depende dele).
   app.patch('/finance/transactions/:id', write, async (req, reply) => {
+    await ensureSchema();
     const { id: tid } = z.object({ id }).parse(req.params);
     const b = z.object({ description: z.string().trim().min(2).max(500).optional(), amount: z.number().positive().optional(),
-      dueDate: z.string().date().optional(), competenceDate: z.string().date().optional() })
+      dueDate: z.string().date().optional(), competenceDate: z.string().date().optional(),
+      discount: z.number().positive().optional() }) // desconto adicional em R$: abate do valor e soma ao desconto já dado
       .refine((v) => Object.keys(v).length > 0, 'nada para alterar').parse(req.body);
-    const [r] = await q(`UPDATE transactions SET description=COALESCE($3,description), amount=COALESCE($4,amount),
-                           due_date=COALESCE($5,due_date), competence_date=COALESCE($6,competence_date)
-                         WHERE id=$1 AND clinic_id=$2 AND status='pending' RETURNING *`,
-      [tid, cid(req), b.description ?? null, b.amount ?? null, b.dueDate ?? null, b.competenceDate ?? null]);
-    if (!r) return reply.code(404).send({ error: 'not found or already paid' });
+    if (b.discount !== undefined && b.amount !== undefined) return reply.code(400).send({ error: 'informe o novo valor ou o desconto, não os dois' });
+    const [r] = await q(`UPDATE transactions SET description=COALESCE($3,description), amount=COALESCE($4,amount) - COALESCE($7::numeric,0),
+                           due_date=COALESCE($5,due_date), competence_date=COALESCE($6,competence_date),
+                           discount=discount + COALESCE($7::numeric,0)
+                         WHERE id=$1 AND clinic_id=$2 AND status='pending' AND COALESCE($4,amount) - COALESCE($7::numeric,0) > 0 RETURNING *`,
+      [tid, cid(req), b.description ?? null, b.amount ?? null, b.dueDate ?? null, b.competenceDate ?? null, b.discount ?? null]);
+    if (!r) return reply.code(404).send({ error: 'not found, already paid or discount too large' });
     await audit(auditCtx(req), 'finance.update', 'transaction', tid);
     return r;
   });

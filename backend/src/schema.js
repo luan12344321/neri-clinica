@@ -194,7 +194,20 @@ ALTER TABLE patients
 // Endereço do paciente (dado pessoal: entra na exportação e na anonimização da LGPD). db/schema.sql já o traz em patients.
 STEPS.push({ has: col('patients', 'address'), sql: 'ALTER TABLE patients ADD COLUMN IF NOT EXISTS address text' });
 
+// Desconto, parcelamento e estorno em lançamentos. amount continua sendo o valor líquido (já com desconto): todos os totais seguem batendo.
+STEPS.push({ has: col('transactions', 'discount'), sql: `ALTER TABLE transactions
+  ADD COLUMN IF NOT EXISTS discount numeric(12,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS installment_group uuid,
+  ADD COLUMN IF NOT EXISTS installment_no int,
+  ADD COLUMN IF NOT EXISTS installments_total int,
+  ADD COLUMN IF NOT EXISTS refunded_at timestamptz,
+  ADD COLUMN IF NOT EXISTS refund_reason text;
+ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_status_check;
+ALTER TABLE transactions ADD CONSTRAINT transactions_status_check CHECK (status IN ('pending','paid','canceled','refunded'));` });
+
+
 let ready;
 export const ensureSchema = () => (ready ??= (async () => {
   for (const s of STEPS) if (!(await q(s.has)).length) await q(s.sql);
 })().catch((e) => { ready = undefined; throw e; }));
+

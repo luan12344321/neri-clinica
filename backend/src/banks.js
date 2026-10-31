@@ -100,7 +100,7 @@ export default async function banks(app) {
   app.get('/finance/transactions', manager, async (req) => {
     await ensureSchema();
     const { limit } = z.object({ limit: z.coerce.number().int().min(1).max(50).default(8) }).parse(req.query);
-    return q(`SELECT t.id, t.type, t.description, t.amount::float AS amount, t.status, t.due_date, t.paid_at,
+    return q(`SELECT t.id, t.type, t.description, t.amount::float AS amount, t.status, t.due_date, t.paid_at, t.refund_reason,
                      c.name AS category, b.name AS bank, p.full_name AS patient
               FROM transactions t LEFT JOIN categories c ON c.id=t.category_id LEFT JOIN bank_accounts b ON b.id=t.bank_account_id
               LEFT JOIN appointments a ON a.id=t.appointment_id AND a.clinic_id=t.clinic_id

@@ -7,7 +7,7 @@ export async function getDashboard(clinicId) {
        FROM appointments a JOIN patients p ON p.id=a.patient_id
        LEFT JOIN procedures pr ON pr.id=a.procedure_id
        JOIN clinics c ON c.id=a.clinic_id
-       WHERE a.clinic_id=$1 AND a.status<>'canceled'
+       WHERE a.clinic_id=$1 AND a.status NOT IN ('canceled','refunded')
          AND (a.starts_at AT TIME ZONE c.timezone)::date = (now() AT TIME ZONE c.timezone)::date
        ORDER BY a.starts_at`, [clinicId]),
     getRevenueByMonth(clinicId, 6),
@@ -19,7 +19,7 @@ export async function getDashboard(clinicId) {
        ORDER BY p.full_name LIMIT 20`, [clinicId]),
     // faturamento do dia (receita reconhecida hoje, no fuso da clínica)
     q(`SELECT COALESCE(SUM(t.amount), 0)::float AS revenue FROM transactions t JOIN clinics c ON c.id=t.clinic_id
-       WHERE t.clinic_id=$1 AND t.type='income' AND t.status<>'canceled'
+       WHERE t.clinic_id=$1 AND t.type='income' AND t.status NOT IN ('canceled','refunded')
          AND t.competence_date = (now() AT TIME ZONE c.timezone)::date`, [clinicId]),
   ]);
   return { today, birthdays, todayRevenue: day.revenue, revenueByMonth: revenue, topProcedures: top };
@@ -29,7 +29,7 @@ export const getRevenueByMonth = (clinicId, months) =>
   q(`WITH since AS (SELECT (date_trunc('month', current_date) - ($2::int - 1) * interval '1 month')::date AS d),
      rev AS (SELECT date_trunc('month', competence_date)::date AS mon, SUM(amount)::float AS revenue
              FROM transactions, since
-             WHERE clinic_id=$1 AND type='income' AND status<>'canceled' AND competence_date >= since.d
+             WHERE clinic_id=$1 AND type='income' AND status NOT IN ('canceled','refunded') AND competence_date >= since.d
              GROUP BY 1),
      pat AS (SELECT date_trunc('month', completed_at)::date AS mon, COUNT(DISTINCT patient_id)::int AS patients
              FROM appointments, since
@@ -57,7 +57,7 @@ export async function getFinanceSummary(clinicId, monthStart) {
             -- só o que veio de atendimento: venda de produto e adiantamento não entram no ticket
             COALESCE(SUM(amount) FILTER (WHERE type='income' AND appointment_id IS NOT NULL),0)::float AS "appointmentIncome"
      FROM transactions
-     WHERE clinic_id=$1 AND status<>'canceled'
+     WHERE clinic_id=$1 AND status NOT IN ('canceled','refunded')
        AND competence_date >= $2::date AND competence_date < $2::date + interval '1 month'`, [clinicId, monthStart]);
   const [t] = await q(
     `SELECT COUNT(*)::int AS n FROM appointments
@@ -89,7 +89,7 @@ export async function buildDre(clinicId, monthStart) {
   const rows = await q(
     `SELECT c.dre_group, SUM(t.amount)::float AS total
      FROM transactions t JOIN categories c ON c.id=t.category_id
-     WHERE t.clinic_id=$1 AND t.status<>'canceled'
+     WHERE t.clinic_id=$1 AND t.status NOT IN ('canceled','refunded')
        AND t.competence_date >= $2::date AND t.competence_date < $2::date + interval '1 month'
      GROUP BY c.dre_group`, [clinicId, monthStart]);
   const g = Object.fromEntries(rows.map((r) => [r.dre_group, r.total]));
