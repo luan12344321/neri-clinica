@@ -608,7 +608,7 @@ function Julia({ name }: { name?: string }) {
           <div className="intro">
             <div className="julia-hero"><Mascote size={190} mood={mood} greet /></div>
             <h2>Olá{name ? `, ${name.split(/\s+/)[0]}` : ''}</h2>
-            <p className="muted">Eu sou a Julia. Pergunte sobre faturamento, pacientes, estoque ou finanças da clínica.</p>
+            <p className="muted">Eu sou a Julia. {isManager ? 'Pergunte sobre faturamento, pacientes, estoque ou finanças da clínica.' : 'Pergunte sobre agenda, pacientes ou estoque da clínica.'}</p>
             <div className="sugg">
               {SUGGESTIONS.filter((s) => !s.mgr || isManager).map((s) => (
                 <button key={s.title} className="sugg-card" onClick={() => send(s.text)}>
